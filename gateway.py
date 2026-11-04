@@ -11,11 +11,7 @@ load_dotenv()
 # ---------- 1. 初始化 Agent ----------
 api_key = os.getenv("DEEPSEEK_API_KEY")
 if not api_key:
-    raise RuntimeError(
-        "缺少 DEEPSEEK_API_KEY。请先设置环境变量后再启动，例如：\n"
-        "  export DEEPSEEK_API_KEY=sk-xxxxxxxx\n"
-        "或在项目根目录创建 .env 文件写入 DEEPSEEK_API_KEY=sk-xxxxxxxx"
-    )
+    raise RuntimeError("DEEPSEEK_API_KEY NOT EXISTS")
 
 model = ChatOpenAI(
     model="deepseek-flash",
@@ -26,11 +22,11 @@ model = ChatOpenAI(
 agent = create_agent(
     model=model,
     tools=[],
-    system_prompt="你是一个乐于助人的助手"
+    system_prompt="你是一个专家"
 )
 
 # ---------- 2. 创建 FastAPI 应用 ----------
-app = FastAPI(title="LangChain Agent API", description="浏览器测试 Agent 的一次性回答和流式输出")
+app = FastAPI(title="MLL Agent API", description="我的第一个练习AGENT")
 
 
 from fastapi.middleware.cors import CORSMiddleware
@@ -44,9 +40,7 @@ app.add_middleware(
 @app.get("/")
 async def root():
     return {
-        "usage": "GET /chat?message=你的问题 → 一次性返回",
-        "stream": "GET /stream?message=你的问题 → 流式返回（SSE）",
-        "example": "http://localhost:8000/chat?message=你好"
+       "HELLO WORLD"
     }
 
 @app.get("/chat")
