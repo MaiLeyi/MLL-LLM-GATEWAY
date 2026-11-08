@@ -24,6 +24,7 @@ class CallMetrics:
     latency_ms: float  # 本次调用总耗时（毫秒）
     first_token_ms: float | None = None  # 首 Token 延迟（毫秒），非流式为 None
     usage: TokenUsage | None = None  # Token 分类消耗，上游未返回时为 None
+    retries: int = 0  # 本次调用因瞬时故障重试的次数
     error_code: str | None = None  # 失败时的错误码
 
     def to_dict(self) -> dict[str, Any]:
@@ -37,6 +38,7 @@ class CallMetrics:
                 None if self.first_token_ms is None else round(self.first_token_ms, 2)
             ),
             "tokens": self.usage.to_dict() if self.usage else None,
+            "retries": self.retries,
             "error_code": self.error_code,
         }
 
@@ -61,6 +63,7 @@ class _Aggregate:
     first_token_ms_sum: float = 0.0  # 首 Token 延迟求和，用于计算均值
     first_token_ms_max: float = 0.0  # 最大首 Token 延迟
     first_token_calls: int = 0  # 有首 Token 延迟统计的调用次数
+    retries: int = 0  # 重试次数累计
 
 
 class MetricsService:
@@ -113,6 +116,7 @@ class MetricsService:
             aggregate.cached_tokens += call.usage.cached_tokens
             aggregate.reasoning_tokens += call.usage.reasoning_tokens
 
+        aggregate.retries += call.retries
         aggregate.latency_ms_sum += call.latency_ms
         aggregate.latency_ms_max = max(aggregate.latency_ms_max, call.latency_ms)
         if call.first_token_ms is not None:
@@ -131,6 +135,7 @@ class MetricsService:
                 "failure": aggregate.failures,
                 "stream": aggregate.stream_calls,
                 "complete": aggregate.complete_calls,
+                "retries": aggregate.retries,
             },
             "tokens": {
                 "calls_with_usage": aggregate.usage_calls,

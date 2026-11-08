@@ -62,7 +62,12 @@ class RetryService:
         # 3. 叠加 0~20% 抖动，避免并发请求同时重试
         return delay + random.uniform(0, delay * 0.2)
 
-    async def run(self, fn: Callable[[], Awaitable[T]]) -> T:
+    async def run(
+        self,
+        fn: Callable[[], Awaitable[T]],
+        *,
+        on_retry: Callable[[int], None] | None = None,
+    ) -> T:
         """执行一次性调用，失败时按指数退避重试。"""
         # 1. 记录已重试次数
         attempt = 0
@@ -74,12 +79,17 @@ class RetryService:
                 # 2.1 不可重试或已达上限：直接抛出
                 if attempt >= self._max_retries or not self.is_retryable(exc):
                     raise
-                # 2.2 递增次数，指数退避后重新执行
+                # 2.2 递增次数，回调通知上层，再指数退避后重新执行
                 attempt += 1
+                if on_retry is not None:
+                    on_retry(attempt)
                 await asyncio.sleep(self.backoff_delay(attempt))
 
     async def iterate(
-        self, factory: Callable[[], AsyncIterator[T]]
+        self,
+        factory: Callable[[], AsyncIterator[T]],
+        *,
+        on_retry: Callable[[int], None] | None = None,
     ) -> AsyncIterator[T]:
         """执行流式调用；仅在产出首个片段前重试，避免已输出内容重复。"""
         # 1. 记录已重试次数
@@ -98,8 +108,10 @@ class RetryService:
                 # 2.3 已产出 / 不可重试 / 达到上限：直接抛出
                 if emitted or attempt >= self._max_retries or not self.is_retryable(exc):
                     raise
-                # 2.4 递增次数，指数退避后重建流
+                # 2.4 递增次数，回调通知上层，再指数退避后重建流
                 attempt += 1
+                if on_retry is not None:
+                    on_retry(attempt)
                 await asyncio.sleep(self.backoff_delay(attempt))
 
     @staticmethod

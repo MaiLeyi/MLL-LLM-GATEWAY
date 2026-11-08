@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import httpx
+from jsonschema import ValidationError, validate
 
 from app.adapters.base import ChatMessage, LLMAdapter, TokenUsage
 from app.adapters.llm import get_adapter
@@ -59,13 +60,20 @@ class ChatAppService:
 
         # 3. 交给重试服务执行上游调用，并记录本次调用指标
         started = time.perf_counter()
+        retries = 0
+
+        def _on_retry(attempt: int) -> None:
+            nonlocal retries
+            retries = attempt
+
         try:
             completion = await retry_service.run(
                 lambda: adapter.complete(
                     messages,
                     response_format=upstream_format,
                     system_prompt=system_prompt,
-                )
+                ),
+                on_retry=_on_retry,
             )
         except Exception as exc:
             # 4. 重试耗尽或不可重试：统一映射为对外错误码
@@ -75,14 +83,15 @@ class ChatAppService:
                 stream=False,
                 started=started,
                 success=False,
+                retries=retries,
                 error_code=error.code.code,
             )
             raise error from exc
 
-        # 5. 结构化输出：要求 JSON 时必须能解析成合法 JSON
+        # 5. 结构化输出：要求 JSON 时必须能解析成合法 JSON，声明 schema 时再做校验
         try:
             data = (
-                self._parse_json(completion.text)
+                self._parse_structured(completion.text, response_format)
                 if response_format.requires_json
                 else None
             )
@@ -93,6 +102,7 @@ class ChatAppService:
                 started=started,
                 success=False,
                 usage=completion.usage,
+                retries=retries,
                 error_code=exc.code.code,
             )
             raise
@@ -103,6 +113,7 @@ class ChatAppService:
             started=started,
             success=True,
             usage=completion.usage,
+            retries=retries,
         )
         return CompletionResult(reply=completion.text, data=data)
 
@@ -139,10 +150,17 @@ class ChatAppService:
         started = time.perf_counter()
         first_token_ms: float | None = None
         usage: TokenUsage | None = None
+        retries = 0
+
+        def _on_retry(attempt: int) -> None:
+            nonlocal retries
+            retries = attempt
+
         try:
             # 2. 交给重试服务流式执行（仅首包前可重试）
             async for chunk in retry_service.iterate(
-                lambda: adapter.stream(messages, system_prompt=system_prompt)
+                lambda: adapter.stream(messages, system_prompt=system_prompt),
+                on_retry=_on_retry,
             ):
                 # 2.1 结束分片携带 usage，覆盖为完整统计
                 if chunk.usage is not None:
@@ -162,6 +180,7 @@ class ChatAppService:
                 success=False,
                 usage=usage,
                 first_token_ms=first_token_ms,
+                retries=retries,
                 error_code=error.code.code,
             )
             raise error from exc
@@ -174,6 +193,7 @@ class ChatAppService:
             success=True,
             usage=usage,
             first_token_ms=first_token_ms,
+            retries=retries,
         )
 
     @staticmethod
@@ -185,6 +205,7 @@ class ChatAppService:
         success: bool,
         usage: TokenUsage | None = None,
         first_token_ms: float | None = None,
+        retries: int = 0,
         error_code: str | None = None,
     ) -> None:
         metrics_service.record(
@@ -195,6 +216,7 @@ class ChatAppService:
                 latency_ms=(time.perf_counter() - started) * 1000,
                 first_token_ms=first_token_ms,
                 usage=usage,
+                retries=retries,
                 error_code=error_code,
             )
         )
@@ -211,6 +233,23 @@ class ChatAppService:
     def _messages(message: str) -> list[ChatMessage]:
         """把用户消息包装成统一的对话消息结构。"""
         return [ChatMessage(role="user", content=message)]
+
+    @staticmethod
+    def _parse_structured(reply: str, response_format: ResponseFormat) -> Any:
+        """解析并校验结构化输出：先保证是合法 JSON，再按声明的 schema 校验。"""
+        data = ChatAppService._parse_json(reply)
+        # json_schema 模式要求返回结构匹配，schema 不匹配同样属于模型输出违约
+        if response_format.type == "json_schema" and response_format.json_schema:
+            try:
+                validate(
+                    instance=data,
+                    schema=response_format.json_schema.schema_,
+                )
+            except ValidationError as exc:
+                raise InvalidModelOutputException(
+                    f"模型返回的 JSON 不符合 schema: {exc.message}"
+                ) from exc
+        return data
 
     @staticmethod
     def _parse_json(reply: str) -> Any:
