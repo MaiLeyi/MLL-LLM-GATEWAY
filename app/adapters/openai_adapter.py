@@ -91,6 +91,7 @@ class OpenAIAdapter(LLMAdapter):
         self,
         system_prompt: str | None = None,
         response_format: dict[str, Any] | None = None,
+        timeout_seconds: float | None = None,
     ):
         # 1. 按模型能力决定走原生 response_format 还是提示词兜底
         native_format, instruction = self._resolve_response_format(response_format)
@@ -102,6 +103,8 @@ class OpenAIAdapter(LLMAdapter):
             model=self._provider_model,
             api_key=self._api_key,
             base_url=self._base_url,
+            # 请求级超时，透传给上游 SDK；None 时使用 SDK 默认
+            timeout=timeout_seconds,
             # 流式调用也要求上游返回 usage，才能统计 Token 消耗
             stream_usage=True,
             # response_format 属于 OpenAI 请求体字段，通过 extra_body 原样下传
@@ -136,12 +139,15 @@ class OpenAIAdapter(LLMAdapter):
         *,
         response_format: dict[str, Any] | None = None,
         system_prompt: str | None = None,
+        timeout_seconds: float | None = None,
     ) -> Completion:
-        # 结构化约束或自定义系统提示词都是请求级参数，需要按本次请求重建 Agent
+        # 结构化约束、自定义提示词、自定义超时都是请求级参数，需要按本次请求重建 Agent
         agent = (
             self._agent
-            if response_format is None and system_prompt is None
-            else self._build_agent(system_prompt, response_format)
+            if response_format is None
+            and system_prompt is None
+            and timeout_seconds is None
+            else self._build_agent(system_prompt, response_format, timeout_seconds)
         )
         response = await agent.ainvoke({"messages": self._to_pairs(messages)})
         message = response["messages"][-1]
@@ -156,11 +162,12 @@ class OpenAIAdapter(LLMAdapter):
         messages: Sequence[ChatMessage],
         *,
         system_prompt: str | None = None,
+        timeout_seconds: float | None = None,
     ) -> AsyncIterator[StreamChunk]:
         agent = (
             self._agent
-            if system_prompt is None
-            else self._build_agent(system_prompt)
+            if system_prompt is None and timeout_seconds is None
+            else self._build_agent(system_prompt, timeout_seconds=timeout_seconds)
         )
         think_filter = _ThinkFilter()
         async for chunk, _metadata in agent.astream(
@@ -200,5 +207,5 @@ class OpenAIAdapter(LLMAdapter):
 
     @staticmethod
     def _to_pairs(messages: Sequence[ChatMessage]) -> list[tuple[str, str]]:
-        # 系统提示词由 Agent 统一注入，这里只转换对话消息
-        return [(m.role, m.content) for m in messages if m.role != "system"]
+        # 角色原样透传（含 system / assistant），保证多轮对话上下文完整
+        return [(m.role, m.content) for m in messages]

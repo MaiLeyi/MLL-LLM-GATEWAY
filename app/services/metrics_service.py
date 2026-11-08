@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.adapters.base import TokenUsage
+from app.config.settings import MODEL_CONFIGS
 
 logger = logging.getLogger(__name__)
 
@@ -14,14 +15,31 @@ logger = logging.getLogger(__name__)
 RECENT_CALL_LIMIT = 100
 
 
+def calculate_cost(model_id: str, usage: TokenUsage | None) -> float | None:
+    """按模型定价与 Token 消耗折算本次调用成本（美元）；无 usage 时返回 None。"""
+    if usage is None:
+        return None
+    config = MODEL_CONFIGS.get(model_id)
+    if config is None:
+        return None
+    return (
+        usage.prompt_tokens * config.input_price_per_million
+        + usage.completion_tokens * config.output_price_per_million
+    ) / 1_000_000
+
+
 @dataclass(frozen=True, slots=True)
 class CallMetrics:
     """单次调用指标：Token 分类消耗、总延迟与首 Token 延迟。"""
 
-    model: str  # 调用使用的模型 id
+    model: str  # 实际应答的模型 id
     stream: bool  # 是否为流式调用
     success: bool  # 调用是否成功
     latency_ms: float  # 本次调用总耗时（毫秒）
+    request_id: str = ""  # 本次请求的 ID，同一请求的主备多次尝试共享
+    requested_model: str | None = None  # 调用方请求的模型 id，与 model 不同即发生了主备切换
+    prompt_name: str | None = None  # 本次调用引用的 Prompt 模板名，便于按模板版本归因
+    prompt_version: str | None = None  # 引用的模板版本（含 latest 解析后的具体版本）
     first_token_ms: float | None = None  # 首 Token 延迟（毫秒），非流式为 None
     usage: TokenUsage | None = None  # Token 分类消耗，上游未返回时为 None
     retries: int = 0  # 本次调用因瞬时故障重试的次数
@@ -30,6 +48,10 @@ class CallMetrics:
     def to_dict(self) -> dict[str, Any]:
         return {
             "timestamp": datetime.now(timezone.utc).isoformat(),
+            "request_id": self.request_id,
+            "requested_model": self.requested_model,
+            "prompt_name": self.prompt_name,
+            "prompt_version": self.prompt_version,
             "model": self.model,
             "stream": self.stream,
             "success": self.success,
@@ -64,6 +86,8 @@ class _Aggregate:
     first_token_ms_max: float = 0.0  # 最大首 Token 延迟
     first_token_calls: int = 0  # 有首 Token 延迟统计的调用次数
     retries: int = 0  # 重试次数累计
+    fallbacks: int = 0  # 主备切换次数：实际应答模型与请求模型不同的调用数
+    cost_usd: float = 0.0  # 累计成本（美元），按模型价格表折算
 
 
 class MetricsService:
@@ -77,11 +101,15 @@ class MetricsService:
 
     def record(self, call: CallMetrics) -> None:
         """记录一次调用；日志便于外部采集，聚合数据供 /metrics 查询。"""
+        cost_usd = calculate_cost(call.model, call.usage)
         payload = call.to_dict()
+        payload["cost_usd"] = cost_usd
         logger.info("llm_call %s", json.dumps(payload, ensure_ascii=False))
         with self._lock:
-            self._add(self._total, call)
-            self._add(self._by_model.setdefault(call.model, _Aggregate()), call)
+            self._add(self._total, call, cost_usd)
+            self._add(
+                self._by_model.setdefault(call.model, _Aggregate()), call, cost_usd
+            )
             self._recent.append(payload)
 
     def snapshot(self) -> dict[str, Any]:
@@ -97,7 +125,7 @@ class MetricsService:
             }
 
     @staticmethod
-    def _add(aggregate: _Aggregate, call: CallMetrics) -> None:
+    def _add(aggregate: _Aggregate, call: CallMetrics, cost_usd: float | None) -> None:
         aggregate.calls += 1
         if call.success:
             aggregate.successes += 1
@@ -107,6 +135,12 @@ class MetricsService:
             aggregate.stream_calls += 1
         else:
             aggregate.complete_calls += 1
+
+        # 实际应答模型与请求模型不同，说明发生了主备切换
+        if call.requested_model is not None and call.requested_model != call.model:
+            aggregate.fallbacks += 1
+        if cost_usd is not None:
+            aggregate.cost_usd += cost_usd
 
         if call.usage is not None:
             aggregate.usage_calls += 1
@@ -136,6 +170,7 @@ class MetricsService:
                 "stream": aggregate.stream_calls,
                 "complete": aggregate.complete_calls,
                 "retries": aggregate.retries,
+                "fallbacks": aggregate.fallbacks,
             },
             "tokens": {
                 "calls_with_usage": aggregate.usage_calls,
@@ -145,6 +180,7 @@ class MetricsService:
                 "cached": aggregate.cached_tokens,
                 "reasoning": aggregate.reasoning_tokens,
             },
+            "cost_usd": round(aggregate.cost_usd, 6),
             "latency_ms": {
                 "avg": (
                     round(aggregate.latency_ms_sum / aggregate.calls, 2)

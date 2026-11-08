@@ -23,7 +23,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 import app.application.chat_app_service as chat_app_module  # noqa: E402
 import app.config.settings as settings  # noqa: E402
 import main  # noqa: E402
-from app.adapters.base import Completion  # noqa: E402
+from app.adapters.base import Completion, TokenUsage  # noqa: E402
 from app.services.rate_limit_service import rate_limit_service  # noqa: E402
 from app.services.retry_service import RetryService  # noqa: E402
 
@@ -42,6 +42,7 @@ def new_user_object_prompt() -> str:
 
 def check_routing() -> None:
     """1. 统一抽象层：同一套接口按 model 路由到两个上游。"""
+    body: dict = {}
     for model in ("deepseek", "minimax"):
         response = client.post(
             "/chat", json={"message": "请只回答两个字：你好", "model": model}
@@ -52,38 +53,87 @@ def check_routing() -> None:
             response.status_code == 200 and bool(body.get("reply")),
             f"status={response.status_code} reply={str(body.get('reply'))[:30]!r}",
         )
+    check(
+        "响应字段 / usage、latency_ms、attempts 完整",
+        isinstance(body.get("usage"), dict)
+        and body["usage"]["total"] > 0
+        and isinstance(body.get("latency_ms"), int)
+        and body.get("attempts", 0) >= 1
+        and bool(body.get("request_id")),
+        f"usage={body.get('usage')} latency_ms={body.get('latency_ms')} attempts={body.get('attempts')}",
+    )
+
+
+def check_multiturn() -> None:
+    """1b. 多轮消息：user/assistant 角色完整传递；message 与 messages 互斥。"""
+    response = client.post(
+        "/chat",
+        json={
+            "model": "deepseek",
+            "messages": [
+                {"role": "user", "content": "请记住数字 42，只回答：好"},
+                {"role": "assistant", "content": "好"},
+                {"role": "user", "content": "我刚才让你记住的数字是什么？只回答数字"},
+            ],
+        },
+    )
+    body = response.json()
+    check(
+        "多轮消息 / 多角色上下文生效",
+        response.status_code == 200 and "42" in str(body.get("reply", "")),
+        f"status={response.status_code} reply={str(body.get('reply'))[:40]!r}",
+    )
+
+    both = client.post(
+        "/chat",
+        json={
+            "model": "deepseek",
+            "message": "hi",
+            "messages": [{"role": "user", "content": "hi"}],
+        },
+    )
+    check(
+        "多轮消息 / message 与 messages 互斥",
+        both.status_code == 422,
+        f"status={both.status_code} body={both.json()}",
+    )
 
 
 def check_stream() -> None:
-    """2. 流式输出：SSE 逐块返回并以 [DONE] 结束。"""
+    """2. 流式输出：标准 SSE 事件序列（response.created / content.delta / response.completed）。"""
     response = client.post(
         "/stream", json={"message": "从 1 数到 5，用逗号分隔", "model": "minimax"}
     )
-    chunks = [
-        line[len("data: ") :]
-        for line in response.text.splitlines()
-        if line.startswith("data: ")
+    events = []
+    for line in response.text.splitlines():
+        if line.startswith("data: "):
+            try:
+                events.append(json.loads(line[len("data: ") :]))
+            except json.JSONDecodeError:
+                pass
+    types = [event.get("type") for event in events]
+    deltas = [
+        event.get("delta", "")
+        for event in events
+        if event.get("type") == "content.delta"
     ]
-    contents = []
-    for chunk in chunks:
-        if chunk == "[DONE]":
-            continue
-        try:
-            contents.append(json.loads(chunk).get("content", ""))
-        except json.JSONDecodeError:
-            pass
+    completed = [event for event in events if event.get("type") == "response.completed"]
     check(
-        "流式输出 / SSE 分块",
+        "流式输出 / 标准 SSE 事件序列",
         response.status_code == 200
         and response.headers.get("content-type", "").startswith("text/event-stream")
-        and len(contents) >= 2
-        and chunks[-1] == "[DONE]",
-        f"chunks={len(contents)} done={chunks[-1] == '[DONE]'} text={''.join(contents)[:60]!r}",
+        and types[0] == "response.created"
+        and bool(types[0] and events[0].get("request_id"))
+        and len(deltas) >= 2
+        and len(completed) == 1
+        and completed[0].get("model") == "minimax"
+        and isinstance(completed[0].get("usage"), dict),
+        f"first={types[0] if types else None} deltas={len(deltas)} completed={completed}",
     )
     check(
         "流式输出 / 推理块不泄漏",
-        "<think>" not in "".join(contents),
-        f"contains_think={'<think>' in ''.join(contents)}",
+        "<think>" not in "".join(deltas),
+        f"contains_think={'<think>' in ''.join(deltas)}",
     )
 
 
@@ -213,6 +263,23 @@ def check_prompt() -> None:
         f"status={response.status_code} reply={str(response.json().get('reply'))[:40]!r}",
     )
 
+    # 指标明细应记录解析后的模板名与具体版本，便于按模板版本归因
+    metric = next(
+        (
+            item
+            for item in client.get("/metrics").json()["recent"]
+            if item["request_id"] == response.json()["request_id"]
+        ),
+        None,
+    )
+    check(
+        "模板管理 / 指标记录模板版本",
+        metric is not None
+        and metric.get("prompt_name") == "verify_demo"
+        and metric.get("prompt_version") == "v1",
+        f"prompt={metric.get('prompt_name') if metric else None}@{metric.get('prompt_version') if metric else None}",
+    )
+
     missing = client.post(
         "/chat",
         json={
@@ -273,6 +340,11 @@ def check_metrics() -> None:
         and "retries" in total["calls"]
         and "retries" in recent[-1],
         f"latency_avg={total['latency_ms']['avg']} retries={total['calls'].get('retries')}",
+    )
+    check(
+        "可观测 / 成本累计",
+        total["cost_usd"] > 0 and "fallbacks" in total["calls"],
+        f"cost_usd={total['cost_usd']} fallbacks={total['calls'].get('fallbacks')}",
     )
 
 
@@ -347,14 +419,112 @@ def check_rate_limit() -> None:
         object.__setattr__(config, "rate_limit_per_minute", original_limit)
 
 
+def check_fallback_and_cost() -> None:
+    """7. 主备切换与成本核算：主模型持续故障时切备用模型，并按价格表折算成本。"""
+    import time as _time
+
+    class AlwaysDownAdapter:
+        """主模型替身：模拟上游持续不可用。"""
+
+        async def complete(self, *args, **kwargs) -> Completion:
+            raise ConnectionError("primary down")
+
+    class BackupAdapter:
+        """备用模型替身：返回带 usage 的固定回答。"""
+
+        async def complete(self, *args, **kwargs) -> Completion:
+            return Completion(
+                text="backup-ok",
+                usage=TokenUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+            )
+
+    adapters = {"deepseek": AlwaysDownAdapter(), "minimax": BackupAdapter()}
+    original = chat_app_module.get_adapter
+    chat_app_module.get_adapter = lambda model_id: adapters[model_id]
+    try:
+        started = _time.perf_counter()
+        response = client.post("/chat", json={"message": "hi", "model": "deepseek"})
+        body = response.json()
+        check(
+            "主备切换 / 主模型故障切到备用",
+            response.status_code == 200
+            and body.get("reply") == "backup-ok"
+            and body.get("model") == "minimax"
+            and bool(body.get("request_id"))
+            and body.get("attempts") == 5  # 主模型 1+3 次重试 + 备用 1 次
+            and body.get("usage", {}).get("total") == 15,
+            f"status={response.status_code} model={body.get('model')} "
+            f"request_id={body.get('request_id')} attempts={body.get('attempts')} "
+            f"elapsed={_time.perf_counter() - started:.1f}s",
+        )
+
+        recent = client.get("/metrics").json()["recent"]
+        last_two = recent[-2:]
+        check(
+            "主备切换 / 同一 request_id 串联两次尝试",
+            last_two[0]["model"] == "deepseek"
+            and last_two[0]["success"] is False
+            and last_two[1]["model"] == "minimax"
+            and last_two[1]["success"] is True
+            and last_two[0]["request_id"]
+            == last_two[1]["request_id"]
+            == body["request_id"],
+            f"recent={[(r['model'], r['success']) for r in last_two]}",
+        )
+
+        minimax_price = settings.MODEL_CONFIGS["minimax"]
+        expected = (
+            10 * minimax_price.input_price_per_million
+            + 5 * minimax_price.output_price_per_million
+        ) / 1_000_000
+        cost = last_two[1]["cost_usd"]
+        check(
+            "成本核算 / 按价格表折算",
+            cost is not None and abs(cost - expected) < 1e-12,
+            f"cost_usd={cost} expected={expected}",
+        )
+    finally:
+        chat_app_module.get_adapter = original
+
+
+def check_timeout() -> None:
+    """8. 请求级超时：合法值生效，越界值返回 422。"""
+    ok = client.post(
+        "/chat",
+        json={
+            "message": "只回答两个字：好的",
+            "model": "deepseek",
+            "timeout_seconds": 60,
+        },
+    )
+    check(
+        "请求超时 / 自定义超时生效",
+        ok.status_code == 200 and bool(ok.json().get("reply")),
+        f"status={ok.status_code}",
+    )
+    for bad in (0, 121):
+        invalid = client.post(
+            "/chat",
+            json={"message": "hi", "model": "deepseek", "timeout_seconds": bad},
+        )
+        check(
+            f"请求超时 / 越界值 {bad} 返回 422",
+            invalid.status_code == 422,
+            f"status={invalid.status_code}",
+        )
+
+
 def main_entry() -> int:
     check_routing()
+    check_multiturn()
     check_stream()
     check_structured()
     check_prompt()
     check_metrics()
     check_retry()
     check_rate_limit()
+    check_fallback_and_cost()
+    check_timeout()
 
     failed = [name for name, ok, _ in results if not ok]
     print("\n" + "=" * 60)

@@ -68,8 +68,10 @@ class AnthropicAdapter(LLMAdapter):
         *,
         response_format: dict[str, Any] | None = None,
         system_prompt: str | None = None,
+        timeout_seconds: float | None = None,
     ) -> Completion:
-        async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
+        # 请求级超时，None 时使用适配器默认 60s
+        async with httpx.AsyncClient(timeout=timeout_seconds or TIMEOUT_SECONDS) as client:
             response = await client.post(
                 f"{self._base_url}/v1/messages",
                 headers=self._headers(),
@@ -96,11 +98,13 @@ class AnthropicAdapter(LLMAdapter):
         messages: Sequence[ChatMessage],
         *,
         system_prompt: str | None = None,
+        timeout_seconds: float | None = None,
     ) -> AsyncIterator[StreamChunk]:
         # 1. 记录 message_start 返回的输入侧消耗，等 message_delta 补全输出侧
         prompt_tokens = 0
         cached_tokens = 0
-        async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
+        # 请求级超时，None 时使用适配器默认 60s
+        async with httpx.AsyncClient(timeout=timeout_seconds or TIMEOUT_SECONDS) as client:
             async with client.stream(
                 "POST",
                 f"{self._base_url}/v1/messages",

@@ -69,17 +69,22 @@ class PromptService:
 
     def render(self, selection: PromptSelection) -> str:
         """按引用渲染系统提示词，变量缺失或格式错误都返回 400。"""
+        return self.render_resolved(selection)[0]
+
+    def render_resolved(self, selection: PromptSelection) -> tuple[str, "PromptTemplate"]:
+        """渲染并返回 (系统提示词, 解析后的模板)，供指标记录 latest 对应的具体版本。"""
         # 1. 先解析版本引用，拿到具体版本的正文
         template = self.get(selection.name, selection.version)
         # 2. 用调用方变量替换占位符；缺失变量属于调用方错误
         try:
-            return Template(template.template).substitute(selection.variables)
+            text = Template(template.template).substitute(selection.variables)
         except KeyError as exc:
             raise InvalidRequestException(
                 f"缺少 Prompt 变量: {exc.args[0]}"
             ) from exc
         except ValueError as exc:
             raise InvalidRequestException(f"Prompt 模板渲染失败: {exc}") from exc
+        return text, template
 
     def _put(self, name: str, version: str, template: str) -> PromptTemplate:
         """在锁内写入一个版本；重复版本直接拒绝，保证版本可追溯。"""

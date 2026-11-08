@@ -17,3 +17,8 @@ class ModelConfig:
     structured_output_mode: StructuredOutputMode | None = None
     # 单模型独立限流：每分钟允许的请求数，<=0 表示不限制
     rate_limit_per_minute: int = 60
+    # 主备切换：本模型上游不可用时切换的备用模型 id，None 表示无备用
+    fallback_model: str | None = None
+    # 计价单价：美元 / 百万 Token，成本核算按实际用量折算
+    input_price_per_million: float = 0.0
+    output_price_per_million: float = 0.0

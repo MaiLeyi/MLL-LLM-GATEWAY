@@ -71,8 +71,9 @@ class LLMAdapter(ABC):
         *,
         response_format: dict[str, Any] | None = None,
         system_prompt: str | None = None,
+        timeout_seconds: float | None = None,
     ) -> Completion:
-        """非流式调用，返回完整回答文本与 Token 消耗；system_prompt 覆盖默认系统提示词。"""
+        """非流式调用，返回完整回答文本与 Token 消耗；system_prompt 覆盖默认系统提示词；timeout_seconds 为 None 时使用适配器默认超时。"""
 
     @abstractmethod
     def stream(
@@ -80,5 +81,6 @@ class LLMAdapter(ABC):
         messages: Sequence[ChatMessage],
         *,
         system_prompt: str | None = None,
+        timeout_seconds: float | None = None,
     ) -> AsyncIterator[StreamChunk]:
-        """流式调用，按片段产出回答文本与 Token 消耗；system_prompt 覆盖默认系统提示词。"""
+        """流式调用，按片段产出回答文本与 Token 消耗；system_prompt 覆盖默认系统提示词；timeout_seconds 为 None 时使用适配器默认超时。"""
