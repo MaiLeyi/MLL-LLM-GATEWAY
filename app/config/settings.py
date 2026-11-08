@@ -11,6 +11,7 @@ class ModelConfig:
     model: str
     base_url: str
     api_key_env: str
+    protocol: str
 
 
 MODEL_CONFIGS: dict[str, ModelConfig] = {
@@ -18,13 +19,17 @@ MODEL_CONFIGS: dict[str, ModelConfig] = {
         model="deepseek-flash",
         base_url="https://api.deepseek.com",
         api_key_env="DEEPSEEK_API_KEY",
+        protocol="openai",
     ),
     "minimax": ModelConfig(
         model="MiniMax-M3",
         base_url="https://api.minimax.cn/v1",
         api_key_env="MINI_MAX_API_KEY",
+        protocol="openai",
     ),
 }
+
+SYSTEM_PROMPT = "你是一个专家"
 
 DEFAULT_MODEL = "deepseek"
 
