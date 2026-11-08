@@ -1,4 +1,7 @@
+import json
 from collections.abc import AsyncIterator, Sequence
+from dataclasses import dataclass
+from typing import Any
 
 import httpx
 
@@ -7,35 +10,60 @@ from app.adapters.llm import get_adapter
 from app.config.settings import MODEL_CONFIGS
 from app.core.exceptions import (
     AppException,
+    InvalidModelOutputException,
     UnsupportedModelException,
     UpstreamException,
     UpstreamTimeoutException,
 )
+from app.schemas.chat import ResponseFormat
 from app.services.rate_limit_service import rate_limit_service
 from app.services.retry_service import retry_service
+
+
+@dataclass(frozen=True, slots=True)
+class CompletionResult:
+    """一次性调用的结构化结果：原始回答 + 按约束解析出的数据。"""
+
+    reply: str
+    data: Any | None = None
 
 
 class ChatAppService:
     """应用服务层：编排模型校验、限流、适配器调用、重试与错误映射。"""
 
-    async def complete(self, message: str, model_id: str) -> str:
-        """一次性返回完整回答。"""
+    async def complete(
+        self,
+        message: str,
+        model_id: str,
+        response_format: ResponseFormat | None = None,
+    ) -> CompletionResult:
+        """一次性返回完整回答，并按 response_format 校验输出。"""
+        response_format = response_format or ResponseFormat()
         # 1. 前置校验
         # 1.1 校验模型是否存在
         self._validate_model(model_id)
         # 1.2 校验模型是否还有配额（超限抛 429）
         await rate_limit_service.check(model_id)
 
-        # 2. 准备调用：获取适配器、组装对话消息
+        # 2. 准备调用：获取适配器、组装对话消息与上游格式约束
         adapter = get_adapter(model_id)
         messages = self._messages(message)
+        upstream_format = response_format.to_upstream()
 
         try:
             # 3. 交给重试服务执行上游调用
-            return await retry_service.run(lambda: adapter.complete(messages))
+            reply = await retry_service.run(
+                lambda: adapter.complete(
+                    messages, response_format=upstream_format
+                )
+            )
         except Exception as exc:
             # 4. 重试耗尽或不可重试：统一映射为对外错误码
             raise self._upstream_error(model_id, exc) from exc
+
+        # 5. 结构化输出：要求 JSON 时必须能解析成合法 JSON
+        data = self._parse_json(reply) if response_format.requires_json else None
+        return CompletionResult(reply=reply, data=data)
 
     async def stream_reply(self, message: str, model_id: str) -> AsyncIterator[str]:
         """返回流式回答；校验与限流在返回前完成，超限才能正常响应 429。"""
@@ -80,6 +108,16 @@ class ChatAppService:
     def _messages(message: str) -> list[ChatMessage]:
         """把用户消息包装成统一的对话消息结构。"""
         return [ChatMessage(role="user", content=message)]
+
+    @staticmethod
+    def _parse_json(reply: str) -> Any:
+        """把模型输出解析为 JSON；不合法时抛 502，保证对外契约。"""
+        try:
+            return json.loads(reply)
+        except json.JSONDecodeError as exc:
+            raise InvalidModelOutputException(
+                f"模型未返回合法 JSON: {exc.msg}"
+            ) from exc
 
     @staticmethod
     def _upstream_error(model_id: str, exc: Exception) -> AppException:

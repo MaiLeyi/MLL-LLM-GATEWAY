@@ -6,20 +6,20 @@ from fastapi.responses import StreamingResponse
 from app.application.chat_app_service import chat_app_service
 from app.config.settings import DEFAULT_MODEL
 from app.core.exceptions import AppException
+from app.schemas.chat import ChatRequest, ChatResponse
 
 router = APIRouter(tags=["chat"])
 
 
-@router.get("/chat")
-async def chat(
-    message: str = Query(..., description="用户输入的消息"),
-    model: str = Query(DEFAULT_MODEL, description="模型 id"),
-):
-    """一次性返回完整回答"""
+@router.post("/chat", response_model=ChatResponse)
+async def chat(payload: ChatRequest) -> ChatResponse:
+    """一次性返回完整回答，支持 response_format 结构化输出"""
     # 1. 交给应用服务完成校验、限流、重试与上游调用
-    reply = await chat_app_service.complete(message, model)
-    # 2. 接口层只负责组装 HTTP 响应
-    return {"reply": reply}
+    result = await chat_app_service.complete(
+        payload.message, payload.model, payload.response_format
+    )
+    # 2. 接口层只负责组装结构化响应
+    return ChatResponse(reply=result.reply, data=result.data)
 
 
 @router.get("/stream")

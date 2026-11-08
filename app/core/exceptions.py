@@ -46,5 +46,9 @@ class UpstreamException(AppException):
     error_code = ErrorCode.UPSTREAM_ERROR
 
 
+class InvalidModelOutputException(AppException):
+    error_code = ErrorCode.INVALID_MODEL_OUTPUT
+
+
 class InternalException(AppException):
     error_code = ErrorCode.INTERNAL_ERROR

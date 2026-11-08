@@ -1,5 +1,6 @@
 import json
 from collections.abc import AsyncIterator, Sequence
+from typing import Any
 
 import httpx
 
@@ -27,11 +28,19 @@ class AnthropicAdapter(LLMAdapter):
         }
 
     def _payload(
-        self, messages: Sequence[ChatMessage], stream: bool
+        self,
+        messages: Sequence[ChatMessage],
+        stream: bool,
+        response_format: dict[str, Any] | None = None,
     ) -> dict:
-        system = "\n\n".join(
-            [SYSTEM_PROMPT, *[m.content for m in messages if m.role == "system"]]
-        )
+        system_parts = [
+            SYSTEM_PROMPT,
+            *[m.content for m in messages if m.role == "system"],
+        ]
+        # Anthropic 无原生 response_format，用系统提示词把 JSON 约束传递给模型
+        if response_format is not None:
+            system_parts.append(self._json_instruction(response_format))
+        system = "\n\n".join(system_parts)
         return {
             "model": self._model,
             "max_tokens": MAX_TOKENS,
@@ -44,12 +53,31 @@ class AnthropicAdapter(LLMAdapter):
             ],
         }
 
-    async def complete(self, messages: Sequence[ChatMessage]) -> str:
+    @staticmethod
+    def _json_instruction(response_format: dict[str, Any]) -> str:
+        """把 OpenAI 的 response_format 转成自然语言约束。"""
+        if response_format.get("type") == "json_schema":
+            schema = response_format.get("json_schema", {}).get("schema", {})
+            return (
+                "请只返回符合以下 JSON Schema 的合法 JSON，"
+                "不要输出多余文字或 Markdown 代码块：\n"
+                + json.dumps(schema, ensure_ascii=False)
+            )
+        return "请只返回合法 JSON，不要输出多余文字或 Markdown 代码块。"
+
+    async def complete(
+        self,
+        messages: Sequence[ChatMessage],
+        *,
+        response_format: dict[str, Any] | None = None,
+    ) -> str:
         async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
             response = await client.post(
                 f"{self._base_url}/v1/messages",
                 headers=self._headers(),
-                json=self._payload(messages, stream=False),
+                json=self._payload(
+                    messages, stream=False, response_format=response_format
+                ),
             )
             response.raise_for_status()
             data = response.json()

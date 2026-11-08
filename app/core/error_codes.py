@@ -10,6 +10,7 @@ class ErrorCode(Enum):
     RATE_LIMITED = ("RATE_LIMITED", 429, "请求过于频繁")
     UPSTREAM_TIMEOUT = ("UPSTREAM_TIMEOUT", 504, "上游模型调用超时")
     UPSTREAM_ERROR = ("UPSTREAM_ERROR", 502, "上游模型调用失败")
+    INVALID_MODEL_OUTPUT = ("INVALID_MODEL_OUTPUT", 502, "模型返回内容不符合输出格式约束")
     INTERNAL_ERROR = ("INTERNAL_ERROR", 500, "服务内部错误")
 
     def __init__(self, code: str, http_status: int, message: str):
