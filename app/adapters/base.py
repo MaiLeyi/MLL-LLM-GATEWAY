@@ -70,9 +70,15 @@ class LLMAdapter(ABC):
         messages: Sequence[ChatMessage],
         *,
         response_format: dict[str, Any] | None = None,
+        system_prompt: str | None = None,
     ) -> Completion:
-        """非流式调用，返回完整回答文本与 Token 消耗；response_format 为 OpenAI 协议的格式约束。"""
+        """非流式调用，返回完整回答文本与 Token 消耗；system_prompt 覆盖默认系统提示词。"""
 
     @abstractmethod
-    def stream(self, messages: Sequence[ChatMessage]) -> AsyncIterator[StreamChunk]:
-        """流式调用，按片段产出回答文本与 Token 消耗。"""
+    def stream(
+        self,
+        messages: Sequence[ChatMessage],
+        *,
+        system_prompt: str | None = None,
+    ) -> AsyncIterator[StreamChunk]:
+        """流式调用，按片段产出回答文本与 Token 消耗；system_prompt 覆盖默认系统提示词。"""

@@ -29,11 +29,16 @@ class OpenAIAdapter(LLMAdapter):
         # 默认（text）场景复用同一个 Agent，避免每次请求重复构建
         self._agent = self._build_agent()  # 复用的默认 Agent 实例
 
-    def _build_agent(self, response_format: dict[str, Any] | None = None):
+    def _build_agent(
+        self,
+        system_prompt: str | None = None,
+        response_format: dict[str, Any] | None = None,
+    ):
         # 1. 按模型能力决定走原生 response_format 还是提示词兜底
         native_format, instruction = self._resolve_response_format(response_format)
+        base_prompt = system_prompt or SYSTEM_PROMPT
         system_prompt = (
-            SYSTEM_PROMPT if instruction is None else f"{SYSTEM_PROMPT}\n\n{instruction}"
+            base_prompt if instruction is None else f"{base_prompt}\n\n{instruction}"
         )
         model = ChatOpenAI(
             model=self._provider_model,
@@ -75,12 +80,13 @@ class OpenAIAdapter(LLMAdapter):
         messages: Sequence[ChatMessage],
         *,
         response_format: dict[str, Any] | None = None,
+        system_prompt: str | None = None,
     ) -> Completion:
-        # 结构化约束是请求级参数，需要按本次请求重建 Agent
+        # 结构化约束或自定义系统提示词都是请求级参数，需要按本次请求重建 Agent
         agent = (
             self._agent
-            if response_format is None
-            else self._build_agent(response_format)
+            if response_format is None and system_prompt is None
+            else self._build_agent(system_prompt, response_format)
         )
         response = await agent.ainvoke({"messages": self._to_pairs(messages)})
         message = response["messages"][-1]
@@ -90,9 +96,17 @@ class OpenAIAdapter(LLMAdapter):
         )
 
     async def stream(
-        self, messages: Sequence[ChatMessage]
+        self,
+        messages: Sequence[ChatMessage],
+        *,
+        system_prompt: str | None = None,
     ) -> AsyncIterator[StreamChunk]:
-        async for chunk, _metadata in self._agent.astream(
+        agent = (
+            self._agent
+            if system_prompt is None
+            else self._build_agent(system_prompt)
+        )
+        async for chunk, _metadata in agent.astream(
             {"messages": self._to_pairs(messages)},
             stream_mode="messages",
         ):

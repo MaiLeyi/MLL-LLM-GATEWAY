@@ -17,7 +17,9 @@ from app.core.exceptions import (
     UpstreamTimeoutException,
 )
 from app.schemas.chat import ResponseFormat
+from app.schemas.prompt import PromptSelection
 from app.services.metrics_service import CallMetrics, metrics_service
+from app.services.prompt_service import prompt_service
 from app.services.rate_limit_service import rate_limit_service
 from app.services.retry_service import retry_service
 
@@ -38,13 +40,16 @@ class ChatAppService:
         message: str,
         model_id: str,
         response_format: ResponseFormat | None = None,
+        prompt: PromptSelection | None = None,
     ) -> CompletionResult:
         """一次性返回完整回答，并按 response_format 校验输出。"""
         response_format = response_format or ResponseFormat()
         # 1. 前置校验
         # 1.1 校验模型是否存在
         self._validate_model(model_id)
-        # 1.2 校验模型是否还有配额（超限抛 429）
+        # 1.2 按版本引用渲染系统提示词（模板不存在/变量缺失在此返回 4xx）
+        system_prompt = prompt_service.render(prompt) if prompt else None
+        # 1.3 校验模型是否还有配额（超限抛 429）
         await rate_limit_service.check(model_id)
 
         # 2. 准备调用：获取适配器、组装对话消息与上游格式约束
@@ -57,7 +62,9 @@ class ChatAppService:
         try:
             completion = await retry_service.run(
                 lambda: adapter.complete(
-                    messages, response_format=upstream_format
+                    messages,
+                    response_format=upstream_format,
+                    system_prompt=system_prompt,
                 )
             )
         except Exception as exc:
@@ -99,12 +106,19 @@ class ChatAppService:
         )
         return CompletionResult(reply=completion.text, data=data)
 
-    async def stream_reply(self, message: str, model_id: str) -> AsyncIterator[str]:
+    async def stream_reply(
+        self,
+        message: str,
+        model_id: str,
+        prompt: PromptSelection | None = None,
+    ) -> AsyncIterator[str]:
         """返回流式回答；校验与限流在返回前完成，超限才能正常响应 429。"""
         # 1. 前置校验（必须发生在返回流之前）
         # 1.1 校验模型是否存在
         self._validate_model(model_id)
-        # 1.2 校验模型是否还有配额
+        # 1.2 按版本引用渲染系统提示词
+        system_prompt = prompt_service.render(prompt) if prompt else None
+        # 1.3 校验模型是否还有配额
         await rate_limit_service.check(model_id)
 
         # 2. 准备调用：获取适配器、组装对话消息
@@ -112,13 +126,14 @@ class ChatAppService:
         messages = self._messages(message)
 
         # 3. 返回带重试能力的流，异常在流出阶段统一映射
-        return self._stream(model_id, adapter, messages)
+        return self._stream(model_id, adapter, messages, system_prompt)
 
     async def _stream(
         self,
         model_id: str,
         adapter: LLMAdapter,
         messages: Sequence[ChatMessage],
+        system_prompt: str | None = None,
     ) -> AsyncIterator[str]:
         # 1. 记录起始时间、首 Token 延迟与上游返回的 usage
         started = time.perf_counter()
@@ -127,7 +142,7 @@ class ChatAppService:
         try:
             # 2. 交给重试服务流式执行（仅首包前可重试）
             async for chunk in retry_service.iterate(
-                lambda: adapter.stream(messages)
+                lambda: adapter.stream(messages, system_prompt=system_prompt)
             ):
                 # 2.1 结束分片携带 usage，覆盖为完整统计
                 if chunk.usage is not None:

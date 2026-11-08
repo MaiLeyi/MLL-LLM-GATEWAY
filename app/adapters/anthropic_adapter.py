@@ -40,9 +40,10 @@ class AnthropicAdapter(LLMAdapter):
         messages: Sequence[ChatMessage],
         stream: bool,
         response_format: dict[str, Any] | None = None,
+        system_prompt: str | None = None,
     ) -> dict:
         system_parts = [
-            SYSTEM_PROMPT,
+            system_prompt or SYSTEM_PROMPT,
             *[m.content for m in messages if m.role == "system"],
         ]
         # Anthropic 无原生 response_format，用系统提示词把 JSON 约束传递给模型
@@ -66,13 +67,17 @@ class AnthropicAdapter(LLMAdapter):
         messages: Sequence[ChatMessage],
         *,
         response_format: dict[str, Any] | None = None,
+        system_prompt: str | None = None,
     ) -> Completion:
         async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS) as client:
             response = await client.post(
                 f"{self._base_url}/v1/messages",
                 headers=self._headers(),
                 json=self._payload(
-                    messages, stream=False, response_format=response_format
+                    messages,
+                    stream=False,
+                    response_format=response_format,
+                    system_prompt=system_prompt,
                 ),
             )
             response.raise_for_status()
@@ -87,7 +92,10 @@ class AnthropicAdapter(LLMAdapter):
         )
 
     async def stream(
-        self, messages: Sequence[ChatMessage]
+        self,
+        messages: Sequence[ChatMessage],
+        *,
+        system_prompt: str | None = None,
     ) -> AsyncIterator[StreamChunk]:
         # 1. 记录 message_start 返回的输入侧消耗，等 message_delta 补全输出侧
         prompt_tokens = 0
@@ -97,7 +105,9 @@ class AnthropicAdapter(LLMAdapter):
                 "POST",
                 f"{self._base_url}/v1/messages",
                 headers=self._headers(),
-                json=self._payload(messages, stream=True),
+                json=self._payload(
+                    messages, stream=True, system_prompt=system_prompt
+                ),
             ) as response:
                 response.raise_for_status()
                 async for line in response.aiter_lines():
