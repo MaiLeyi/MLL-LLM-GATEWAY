@@ -1,11 +1,12 @@
 import json
+import time
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 from typing import Any
 
 import httpx
 
-from app.adapters.base import ChatMessage, LLMAdapter
+from app.adapters.base import ChatMessage, LLMAdapter, TokenUsage
 from app.adapters.llm import get_adapter
 from app.config.settings import MODEL_CONFIGS
 from app.core.exceptions import (
@@ -16,6 +17,7 @@ from app.core.exceptions import (
     UpstreamTimeoutException,
 )
 from app.schemas.chat import ResponseFormat
+from app.services.metrics_service import CallMetrics, metrics_service
 from app.services.rate_limit_service import rate_limit_service
 from app.services.retry_service import retry_service
 
@@ -24,8 +26,8 @@ from app.services.retry_service import retry_service
 class CompletionResult:
     """一次性调用的结构化结果：原始回答 + 按约束解析出的数据。"""
 
-    reply: str
-    data: Any | None = None
+    reply: str  # 模型返回的原始回答文本
+    data: Any | None = None  # response_format 要求 JSON 时解析出的数据
 
 
 class ChatAppService:
@@ -50,20 +52,52 @@ class ChatAppService:
         messages = self._messages(message)
         upstream_format = response_format.to_upstream()
 
+        # 3. 交给重试服务执行上游调用，并记录本次调用指标
+        started = time.perf_counter()
         try:
-            # 3. 交给重试服务执行上游调用
-            reply = await retry_service.run(
+            completion = await retry_service.run(
                 lambda: adapter.complete(
                     messages, response_format=upstream_format
                 )
             )
         except Exception as exc:
             # 4. 重试耗尽或不可重试：统一映射为对外错误码
-            raise self._upstream_error(model_id, exc) from exc
+            error = self._upstream_error(model_id, exc)
+            self._record_metrics(
+                model_id,
+                stream=False,
+                started=started,
+                success=False,
+                error_code=error.code.code,
+            )
+            raise error from exc
 
         # 5. 结构化输出：要求 JSON 时必须能解析成合法 JSON
-        data = self._parse_json(reply) if response_format.requires_json else None
-        return CompletionResult(reply=reply, data=data)
+        try:
+            data = (
+                self._parse_json(completion.text)
+                if response_format.requires_json
+                else None
+            )
+        except AppException as exc:
+            self._record_metrics(
+                model_id,
+                stream=False,
+                started=started,
+                success=False,
+                usage=completion.usage,
+                error_code=exc.code.code,
+            )
+            raise
+
+        self._record_metrics(
+            model_id,
+            stream=False,
+            started=started,
+            success=True,
+            usage=completion.usage,
+        )
+        return CompletionResult(reply=completion.text, data=data)
 
     async def stream_reply(self, message: str, model_id: str) -> AsyncIterator[str]:
         """返回流式回答；校验与限流在返回前完成，超限才能正常响应 429。"""
@@ -86,15 +120,69 @@ class ChatAppService:
         adapter: LLMAdapter,
         messages: Sequence[ChatMessage],
     ) -> AsyncIterator[str]:
+        # 1. 记录起始时间、首 Token 延迟与上游返回的 usage
+        started = time.perf_counter()
+        first_token_ms: float | None = None
+        usage: TokenUsage | None = None
         try:
-            # 1. 交给重试服务流式执行（仅首包前可重试）
-            async for content in retry_service.iterate(
+            # 2. 交给重试服务流式执行（仅首包前可重试）
+            async for chunk in retry_service.iterate(
                 lambda: adapter.stream(messages)
             ):
-                yield content
+                # 2.1 结束分片携带 usage，覆盖为完整统计
+                if chunk.usage is not None:
+                    usage = chunk.usage
+                if chunk.text:
+                    # 2.2 首个有效文本片段即首 Token 延迟
+                    if first_token_ms is None:
+                        first_token_ms = (time.perf_counter() - started) * 1000
+                    yield chunk.text
         except Exception as exc:
-            # 2. 统一映射为对外错误码
-            raise self._upstream_error(model_id, exc) from exc
+            # 3. 统一映射为对外错误码，并记录失败指标
+            error = self._upstream_error(model_id, exc)
+            self._record_metrics(
+                model_id,
+                stream=True,
+                started=started,
+                success=False,
+                usage=usage,
+                first_token_ms=first_token_ms,
+                error_code=error.code.code,
+            )
+            raise error from exc
+
+        # 4. 正常结束：记录本次流式调用的完整指标
+        self._record_metrics(
+            model_id,
+            stream=True,
+            started=started,
+            success=True,
+            usage=usage,
+            first_token_ms=first_token_ms,
+        )
+
+    @staticmethod
+    def _record_metrics(
+        model_id: str,
+        *,
+        stream: bool,
+        started: float,
+        success: bool,
+        usage: TokenUsage | None = None,
+        first_token_ms: float | None = None,
+        error_code: str | None = None,
+    ) -> None:
+        metrics_service.record(
+            CallMetrics(
+                model=model_id,
+                stream=stream,
+                success=success,
+                latency_ms=(time.perf_counter() - started) * 1000,
+                first_token_ms=first_token_ms,
+                usage=usage,
+                error_code=error_code,
+            )
+        )
 
     @staticmethod
     def _validate_model(model_id: str) -> None:

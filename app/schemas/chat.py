@@ -8,11 +8,11 @@ from app.config.settings import DEFAULT_MODEL
 class JsonSchemaSpec(BaseModel):
     """json_schema 模式的结构描述，字段与 OpenAI 协议保持一致。"""
 
-    name: str = Field(default="response", description="结构名称")
+    name: str = Field(default="response", description="结构名称")  # 上游结构标识名
     schema_: dict[str, Any] = Field(
         ..., alias="schema", description="JSON Schema 定义"
-    )
-    strict: bool = Field(default=True, description="是否严格按 Schema 约束")
+    )  # 期望的 JSON 结构定义
+    strict: bool = Field(default=True, description="是否严格按 Schema 约束")  # 严格模式开关
 
 
 class ResponseFormat(BaseModel):
@@ -20,10 +20,10 @@ class ResponseFormat(BaseModel):
 
     type: Literal["text", "json_object", "json_schema"] = Field(
         default="text", description="输出格式类型"
-    )
+    )  # 输出格式类型：text / json_object / json_schema
     json_schema: JsonSchemaSpec | None = Field(
         default=None, description="type=json_schema 时的结构定义"
-    )
+    )  # json_schema 模式下的结构定义
 
     @model_validator(mode="after")
     def _check_json_schema(self) -> "ResponseFormat":
@@ -54,17 +54,17 @@ class ChatRequest(BaseModel):
 
     message: str = Field(
         ..., min_length=1, max_length=8192, description="用户输入的消息"
-    )
-    model: str = Field(default=DEFAULT_MODEL, description="模型 id")
+    )  # 用户输入的消息
+    model: str = Field(default=DEFAULT_MODEL, description="模型 id")  # 目标模型 id
     response_format: ResponseFormat = Field(
         default_factory=ResponseFormat, description="输出结构化约束"
-    )
+    )  # 输出结构化约束配置
 
 
 class ChatResponse(BaseModel):
     """结构化输出：保留原始回答，JSON 模式下额外返回解析后的数据。"""
 
-    reply: str = Field(..., description="模型返回的原始回答")
+    reply: str = Field(..., description="模型返回的原始回答")  # 模型返回的原始回答
     data: Any | None = Field(
         default=None, description="response_format 要求 JSON 时解析出的结果"
-    )
+    )  # JSON 模式下解析出的结果

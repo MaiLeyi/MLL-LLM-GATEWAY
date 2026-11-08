@@ -8,8 +8,44 @@ Role = Literal["system", "user", "assistant"]
 
 @dataclass(frozen=True, slots=True)
 class ChatMessage:
-    role: Role
-    content: str
+    role: Role  # 消息角色：system / user / assistant
+    content: str  # 消息文本内容
+
+
+@dataclass(frozen=True, slots=True)
+class TokenUsage:
+    """单次调用的 Token 分类消耗。"""
+
+    prompt_tokens: int = 0  # 输入（提示词）Token 数
+    completion_tokens: int = 0  # 输出（回答）Token 数
+    total_tokens: int = 0  # 输入 + 输出总 Token 数
+    cached_tokens: int = 0  # 命中上游缓存的 Token 数
+    reasoning_tokens: int = 0  # 推理过程消耗的 Token 数
+
+    def to_dict(self) -> dict[str, int]:
+        return {
+            "prompt": self.prompt_tokens,
+            "completion": self.completion_tokens,
+            "total": self.total_tokens,
+            "cached": self.cached_tokens,
+            "reasoning": self.reasoning_tokens,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class Completion:
+    """非流式结果：回答文本 + Token 消耗（上游未返回时为 None）。"""
+
+    text: str  # 完整回答文本
+    usage: TokenUsage | None = None  # 本次调用的 Token 分类消耗
+
+
+@dataclass(frozen=True, slots=True)
+class StreamChunk:
+    """流式分片：文本片段；usage 通常只在结束分片返回一次。"""
+
+    text: str = ""  # 本片段输出的文本，结束分片可能为空
+    usage: TokenUsage | None = None  # 本次流式调用的 Token 分类消耗
 
 
 class LLMAdapter(ABC):
@@ -21,9 +57,9 @@ class LLMAdapter(ABC):
         messages: Sequence[ChatMessage],
         *,
         response_format: dict[str, Any] | None = None,
-    ) -> str:
-        """非流式调用，返回完整回答文本；response_format 为 OpenAI 协议的格式约束。"""
+    ) -> Completion:
+        """非流式调用，返回完整回答文本与 Token 消耗；response_format 为 OpenAI 协议的格式约束。"""
 
     @abstractmethod
-    def stream(self, messages: Sequence[ChatMessage]) -> AsyncIterator[str]:
-        """流式调用，按片段产出回答文本。"""
+    def stream(self, messages: Sequence[ChatMessage]) -> AsyncIterator[StreamChunk]:
+        """流式调用，按片段产出回答文本与 Token 消耗。"""

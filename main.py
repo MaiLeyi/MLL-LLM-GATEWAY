@@ -1,7 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.v1.chat import router as chat_router
+from app.api.v1.chat_router import router as chat_router
+from app.api.v1.metrics_router import router as metrics_router
 from app.config.settings import HOST, PORT
 from app.core.exception_handlers import register_exception_handlers
 
@@ -16,6 +17,7 @@ app.add_middleware(
 
 register_exception_handlers(app)
 app.include_router(chat_router)
+app.include_router(metrics_router)
 
 
 @app.get("/")

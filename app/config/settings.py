@@ -8,10 +8,10 @@ load_dotenv()
 
 @dataclass(frozen=True)
 class ModelConfig:
-    model: str
-    base_url: str
-    api_key_env: str
-    protocol: str
+    model: str  # 上游实际模型名称
+    base_url: str  # 上游接口地址
+    api_key_env: str  # 读取 API Key 的环境变量名
+    protocol: str  # 上游协议类型，用于选择适配器（openai / anthropic）
     # 单模型独立限流：每分钟允许的请求数，<=0 表示不限制
     rate_limit_per_minute: int = 60
 
