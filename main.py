@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.chat import router as chat_router
 from app.config.settings import HOST, PORT
+from app.core.exception_handlers import register_exception_handlers
 
 app = FastAPI(title="MLL Agent API", description="我的第一个练习AGENT")
 
@@ -13,6 +14,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+register_exception_handlers(app)
 app.include_router(chat_router)
 
 
