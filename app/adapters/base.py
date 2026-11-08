@@ -1,3 +1,4 @@
+import json
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
@@ -46,6 +47,18 @@ class StreamChunk:
 
     text: str = ""  # 本片段输出的文本，结束分片可能为空
     usage: TokenUsage | None = None  # 本次流式调用的 Token 分类消耗
+
+
+def build_json_instruction(response_format: dict[str, Any]) -> str:
+    """把 OpenAI 的 response_format 转成提示词约束，供不支持原生结构化输出的模型兜底。"""
+    if response_format.get("type") == "json_schema":
+        schema = response_format.get("json_schema", {}).get("schema", {})
+        return (
+            "请只返回符合以下 JSON Schema 的合法 JSON，"
+            "不要输出多余文字或 Markdown 代码块：\n"
+            + json.dumps(schema, ensure_ascii=False)
+        )
+    return "请只返回合法 JSON，不要输出多余文字或 Markdown 代码块。"
 
 
 class LLMAdapter(ABC):

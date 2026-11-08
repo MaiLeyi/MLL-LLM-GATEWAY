@@ -10,8 +10,10 @@ from app.adapters.base import (
     LLMAdapter,
     StreamChunk,
     TokenUsage,
+    build_json_instruction,
 )
-from app.config.settings import SYSTEM_PROMPT, ModelConfig, get_api_key
+from app.config.model_config import ModelConfig
+from app.config.settings import SYSTEM_PROMPT, get_api_key
 
 ANTHROPIC_VERSION = "2023-06-01"
 MAX_TOKENS = 4096
@@ -22,7 +24,7 @@ class AnthropicAdapter(LLMAdapter):
     """Anthropic Messages 协议适配器：x-api-key 鉴权、system 顶层字段、content 块返回。"""
 
     def __init__(self, model_id: str, config: ModelConfig):
-        self._model = config.model  # 上游实际模型名称
+        self._provider_model = config.provider_model  # 上游实际模型名称
         self._base_url = config.base_url.rstrip("/")  # 去除尾部斜杠的上游接口地址
         self._api_key = get_api_key(model_id)  # 上游鉴权 Key
 
@@ -45,10 +47,10 @@ class AnthropicAdapter(LLMAdapter):
         ]
         # Anthropic 无原生 response_format，用系统提示词把 JSON 约束传递给模型
         if response_format is not None:
-            system_parts.append(self._json_instruction(response_format))
+            system_parts.append(build_json_instruction(response_format))
         system = "\n\n".join(system_parts)
         return {
-            "model": self._model,
+            "model": self._provider_model,
             "max_tokens": MAX_TOKENS,
             "system": system,
             "stream": stream,
@@ -58,18 +60,6 @@ class AnthropicAdapter(LLMAdapter):
                 if m.role != "system"
             ],
         }
-
-    @staticmethod
-    def _json_instruction(response_format: dict[str, Any]) -> str:
-        """把 OpenAI 的 response_format 转成自然语言约束。"""
-        if response_format.get("type") == "json_schema":
-            schema = response_format.get("json_schema", {}).get("schema", {})
-            return (
-                "请只返回符合以下 JSON Schema 的合法 JSON，"
-                "不要输出多余文字或 Markdown 代码块：\n"
-                + json.dumps(schema, ensure_ascii=False)
-            )
-        return "请只返回合法 JSON，不要输出多余文字或 Markdown 代码块。"
 
     async def complete(
         self,

@@ -1,34 +1,29 @@
 import os
-from dataclasses import dataclass
 
 from dotenv import load_dotenv
+
+from app.config.model_config import ModelConfig
 
 load_dotenv()
 
 
-@dataclass(frozen=True)
-class ModelConfig:
-    model: str  # 上游实际模型名称
-    base_url: str  # 上游接口地址
-    api_key_env: str  # 读取 API Key 的环境变量名
-    protocol: str  # 上游协议类型，用于选择适配器（openai / anthropic）
-    # 单模型独立限流：每分钟允许的请求数，<=0 表示不限制
-    rate_limit_per_minute: int = 60
-
-
 MODEL_CONFIGS: dict[str, ModelConfig] = {
     "deepseek": ModelConfig(
-        model="deepseek-flash",
+        provider_model="deepseek-flash",
         base_url="https://api.deepseek.com",
         api_key_env="DEEPSEEK_API_KEY",
         protocol="openai",
+        # DeepSeek 原生仅支持 json_object，json_schema 请求会降级
+        structured_output_mode="json_object",
         rate_limit_per_minute=60,
     ),
     "minimax": ModelConfig(
-        model="MiniMax-M3",
+        provider_model="MiniMax-M3",
         base_url="https://api.minimax.cn/v1",
         api_key_env="MINI_MAX_API_KEY",
         protocol="openai",
+        # 保守声明为 json_object，避免上游忽略 json_schema 时静默失效
+        structured_output_mode="json_object",
         rate_limit_per_minute=30,
     ),
 }

@@ -10,37 +10,65 @@ from app.adapters.base import (
     LLMAdapter,
     StreamChunk,
     TokenUsage,
+    build_json_instruction,
 )
-from app.config.settings import SYSTEM_PROMPT, ModelConfig, get_api_key
+from app.config.model_config import ModelConfig
+from app.config.settings import SYSTEM_PROMPT, get_api_key
 
 
 class OpenAIAdapter(LLMAdapter):
     """OpenAI Chat Completions 协议适配器，适用于 DeepSeek、MiniMax 等兼容实现。"""
 
     def __init__(self, model_id: str, config: ModelConfig):
-        self._model = config.model  # 上游实际模型名称
+        self._provider_model = config.provider_model  # 上游实际模型名称
         self._api_key = get_api_key(model_id)  # 上游鉴权 Key
         self._base_url = config.base_url  # 上游接口地址
+        self._structured_output_mode = (
+            config.structured_output_mode
+        )  # 上游原生结构化输出能力
         # 默认（text）场景复用同一个 Agent，避免每次请求重复构建
         self._agent = self._build_agent()  # 复用的默认 Agent 实例
 
     def _build_agent(self, response_format: dict[str, Any] | None = None):
+        # 1. 按模型能力决定走原生 response_format 还是提示词兜底
+        native_format, instruction = self._resolve_response_format(response_format)
+        system_prompt = (
+            SYSTEM_PROMPT if instruction is None else f"{SYSTEM_PROMPT}\n\n{instruction}"
+        )
         model = ChatOpenAI(
-            model=self._model,
+            model=self._provider_model,
             api_key=self._api_key,
             base_url=self._base_url,
             # 流式调用也要求上游返回 usage，才能统计 Token 消耗
             stream_usage=True,
             # response_format 属于 OpenAI 请求体字段，通过 extra_body 原样下传
             extra_body=(
-                {"response_format": response_format} if response_format else None
+                {"response_format": native_format} if native_format else None
             ),
         )
         return create_agent(
             model=model,
             tools=[],
-            system_prompt=SYSTEM_PROMPT,
+            system_prompt=system_prompt,
         )
+
+    def _resolve_response_format(
+        self, response_format: dict[str, Any] | None
+    ) -> tuple[dict[str, Any] | None, str | None]:
+        """按上游能力解析格式：无原生能力走提示词，能力不足时降级。"""
+        if response_format is None:
+            return None, None
+        requested = response_format.get("type")
+        if self._structured_output_mode is None:
+            # 无原生结构化能力：交给提示词约束，网关侧仍会校验 JSON
+            return None, build_json_instruction(response_format)
+        if (
+            requested == "json_schema"
+            and self._structured_output_mode != "json_schema"
+        ):
+            # 只支持 json_object 时降低约束强度，避免上游直接报错
+            return {"type": "json_object"}, None
+        return {"type": requested}, None
 
     async def complete(
         self,
@@ -49,8 +77,10 @@ class OpenAIAdapter(LLMAdapter):
         response_format: dict[str, Any] | None = None,
     ) -> Completion:
         # 结构化约束是请求级参数，需要按本次请求重建 Agent
-        agent = self._agent if response_format is None else self._build_agent(
-            response_format
+        agent = (
+            self._agent
+            if response_format is None
+            else self._build_agent(response_format)
         )
         response = await agent.ainvoke({"messages": self._to_pairs(messages)})
         message = response["messages"][-1]
@@ -59,7 +89,9 @@ class OpenAIAdapter(LLMAdapter):
             usage=self._usage_from_metadata(getattr(message, "usage_metadata", None)),
         )
 
-    async def stream(self, messages: Sequence[ChatMessage]) -> AsyncIterator[StreamChunk]:
+    async def stream(
+        self, messages: Sequence[ChatMessage]
+    ) -> AsyncIterator[StreamChunk]:
         async for chunk, _metadata in self._agent.astream(
             {"messages": self._to_pairs(messages)},
             stream_mode="messages",
