@@ -1,0 +1,622 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MLL Gateway</title>
+<style>
+:root {
+  --bg: #FFFFFF;
+  --surface: #F7F7F8;
+  --muted: #EFEFF2;
+  --text: #171717;
+  --text2: #52525B;
+  --border: rgba(23, 23, 23, 0.12);
+  --brand: #0FDC78;
+  --brand-soft: #E5FFF2;
+  --brand-text: #004D26;
+  --brand-on: #004D26;
+  --danger: #E8463A;
+  --radius: 8px;
+  --radius-card: 12px;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0E0E10;
+    --surface: #171717;
+    --muted: #262626;
+    --text: #E5E5E5;
+    --text2: #A1A1AA;
+    --border: rgba(229, 229, 229, 0.12);
+    --brand: #32F08C;
+    --brand-soft: #004D26;
+    --brand-text: #E5FFF2;
+    --danger: #F87171;
+  }
+}
+* { box-sizing: border-box; margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 400 14px/1.5 "SF Pro Text", "PingFang SC", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+button { font: inherit; color: inherit; cursor: pointer; }
+input, select, textarea { font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 6px 10px; outline: none; }
+input:focus, select:focus, textarea:focus { border-color: var(--brand); }
+
+.wrap { max-width: 880px; margin: 0 auto; padding: 0 20px 48px; }
+
+/* 顶栏 */
+header { display: flex; align-items: center; justify-content: space-between; padding: 16px 0; border-bottom: 1px solid var(--border); }
+.logo { font-weight: 600; font-size: 16px; display: flex; align-items: center; gap: 8px; }
+.logo .sq { width: 12px; height: 12px; border-radius: 3px; background: var(--brand); }
+nav { display: flex; gap: 4px; }
+nav button { border: none; background: none; color: var(--text2); font-weight: 500; padding: 5px 14px; border-radius: 999px; }
+nav button.active { color: var(--brand-text); background: var(--brand-soft); }
+
+main { padding-top: 20px; }
+section[hidden] { display: none; }
+
+/* Playground 控制条 */
+.controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+.controls label { display: inline-flex; align-items: center; gap: 8px; color: var(--text2); border: 1px solid var(--border); border-radius: var(--radius); padding: 4px 10px; background: var(--surface); }
+.controls select { border: none; background: none; padding: 0; font-family: var(--mono); font-size: 13px; }
+.chip-btn { border: 1px solid var(--border); background: var(--surface); border-radius: var(--radius); padding: 4px 12px; color: var(--text2); }
+.chip-btn.on { color: var(--brand-text); background: var(--brand-soft); border-color: transparent; }
+.switch-wrap { margin-left: auto; cursor: pointer; }
+.switch-wrap input { display: none; }
+.switch { width: 30px; height: 17px; border-radius: 999px; background: var(--muted); border: 1px solid var(--border); position: relative; transition: background .15s; }
+.switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 999px; background: var(--surface); transition: left .15s; }
+.switch-wrap input:checked + .switch { background: var(--brand); border-color: transparent; }
+.switch-wrap input:checked + .switch::after { left: 15px; }
+
+/* 折叠面板 */
+.panel { border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); padding: 12px 16px; margin-bottom: 12px; }
+.panel .p-title { font-weight: 500; margin-bottom: 8px; }
+.panel .p-err { color: var(--danger); font-size: 12px; margin-top: 6px; }
+.panel textarea { width: 100%; min-height: 120px; font-family: var(--mono); font-size: 13px; resize: vertical; }
+.p-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.p-row input { width: 160px; }
+#promptVars { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+#promptVars:empty { display: none; }
+#promptVars label { display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 13px; color: var(--text2); }
+#promptVars input { width: 140px; font-family: var(--mono); font-size: 13px; }
+
+/* 对话区 */
+.chat { min-height: 260px; display: flex; flex-direction: column; gap: 12px; padding: 8px 0 16px; }
+.chat .empty { color: var(--text2); text-align: center; padding: 64px 0; }
+.msg { max-width: 78%; padding: 10px 14px; border-radius: var(--radius-card); white-space: pre-wrap; word-break: break-word; }
+.msg.user { align-self: flex-end; background: var(--brand); color: var(--brand-on); border-bottom-right-radius: var(--radius); }
+.msg.ai { align-self: flex-start; background: var(--muted); border-bottom-left-radius: var(--radius); }
+.msg.ai.err { background: none; border: 1px solid var(--danger); color: var(--danger); }
+.msg pre.json { margin-top: 8px; padding: 10px 12px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); font-family: var(--mono); font-size: 13px; overflow-x: auto; white-space: pre; }
+.msg .meta { margin-top: 8px; font-family: var(--mono); font-size: 12px; color: var(--text2); }
+.msg .meta code { background: var(--surface); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; }
+.msg.ai.err .meta { color: var(--danger); opacity: .8; }
+.cursor { display: inline-block; width: 8px; height: 14px; margin-left: 2px; vertical-align: -2px; background: var(--brand); border-radius: 1px; animation: blink 1s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+
+/* 输入条 */
+.inputbar { display: flex; gap: 8px; align-items: flex-end; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); padding: 8px; }
+.inputbar textarea { flex: 1; border: none; background: none; resize: none; max-height: 140px; padding: 6px 8px; }
+.btn-primary { background: var(--brand); color: var(--brand-on); border: none; border-radius: var(--radius); padding: 8px 20px; font-weight: 500; }
+.btn-primary:disabled { opacity: .5; cursor: default; }
+
+/* Metrics */
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; margin-bottom: 24px; }
+.kpi { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-card); padding: 12px 16px; }
+.kpi .v { font-weight: 600; font-size: 16px; font-variant-numeric: tabular-nums; }
+.kpi .l { color: var(--text2); font-size: 12px; margin-top: 4px; }
+.sect { font-size: 12px; font-weight: 500; color: var(--text2); text-transform: uppercase; letter-spacing: .04em; margin: 0 0 8px; }
+.mrow { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+.mrow .name { font-family: var(--mono); font-size: 13px; width: 80px; }
+.mrow .track { flex: 1; height: 8px; border-radius: 999px; background: var(--muted); overflow: hidden; }
+.mrow .fill { height: 100%; border-radius: 999px; background: var(--brand); }
+.mrow .val { color: var(--text2); font-size: 12px; width: 230px; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { text-align: left; color: var(--text2); font-weight: 500; font-size: 12px; padding: 6px 10px; border-bottom: 1px solid var(--border); }
+td { padding: 7px 10px; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+td.mono { font-family: var(--mono); font-size: 12px; }
+tr:last-child td { border-bottom: none; }
+.badge { font-size: 12px; font-weight: 500; border-radius: 999px; padding: 1px 8px; background: var(--muted); color: var(--text2); }
+.badge.ok { background: var(--brand-soft); color: var(--brand-text); }
+.badge.err { background: none; border: 1px solid var(--danger); color: var(--danger); }
+.m-block { margin-bottom: 24px; }
+.hint { color: var(--text2); font-size: 12px; }
+
+/* Prompts */
+.p-layout { display: grid; grid-template-columns: 240px 1fr; gap: 20px; align-items: start; }
+.p-list { border: 1px solid var(--border); border-radius: var(--radius-card); overflow: hidden; }
+.p-group + .p-group { border-top: 1px solid var(--border); }
+.p-name { font-family: var(--mono); font-size: 13px; font-weight: 500; padding: 8px 12px; background: var(--muted); }
+.p-ver { display: flex; align-items: center; gap: 8px; width: 100%; border: none; background: none; padding: 7px 12px; font-family: var(--mono); font-size: 13px; text-align: left; }
+.p-ver:hover, .p-ver.sel { background: var(--surface); }
+.p-ver .latest { font-size: 11px; color: var(--brand-text); background: var(--brand-soft); border-radius: 999px; padding: 0 6px; }
+.p-detail pre { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; font-family: var(--mono); font-size: 13px; white-space: pre-wrap; word-break: break-word; max-height: 260px; overflow: auto; }
+.card { border: 1px solid var(--border); border-radius: var(--radius-card); padding: 16px 20px; margin-bottom: 16px; }
+.card h3 { font-size: 14px; font-weight: 600; margin-bottom: 12px; }
+.card .row { display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+.card textarea { width: 100%; min-height: 100px; font-family: var(--mono); font-size: 13px; resize: vertical; }
+.form-err { color: var(--danger); font-size: 12px; margin-top: 8px; }
+.form-ok { color: var(--brand-text); font-size: 12px; margin-top: 8px; }
+@media (max-width: 680px) { .p-layout { grid-template-columns: 1fr; } .mrow .val { width: auto; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo"><span class="sq"></span>MLL Gateway</div>
+    <nav>
+      <button data-tab="playground" class="active">Playground</button>
+      <button data-tab="metrics">Metrics</button>
+      <button data-tab="prompts">Prompts</button>
+    </nav>
+  </header>
+
+  <main>
+    <!-- Playground -->
+    <section id="playground">
+      <div class="controls">
+        <label>模型 <select id="modelSel"></select></label>
+        <label id="formatWrap">格式
+          <select id="formatSel">
+            <option value="text">text</option>
+            <option value="json_object">json_object</option>
+            <option value="json_schema">json_schema</option>
+          </select>
+        </label>
+        <button class="chip-btn" id="promptBtn">模板引用</button>
+        <label class="switch-wrap">流式 <input type="checkbox" id="streamToggle"><span class="switch"></span></label>
+      </div>
+
+      <div class="panel" id="schemaPanel" hidden>
+        <div class="p-title">JSON Schema</div>
+        <textarea id="schemaInput" spellcheck="false">{
+  "type": "object",
+  "properties": {
+    "name": { "type": "string" },
+    "age": { "type": "integer" }
+  },
+  "required": ["name", "age"]
+}</textarea>
+        <div class="p-err" id="schemaErr" hidden></div>
+      </div>
+
+      <div class="panel" id="promptPanel" hidden>
+        <div class="p-title">模板引用</div>
+        <div class="p-row">
+          <input id="promptName" placeholder="模板名" spellcheck="false">
+          <input id="promptVersion" placeholder="版本（默认 latest）" spellcheck="false">
+        </div>
+        <div id="promptVars"></div>
+        <div class="p-err" id="promptErr" hidden></div>
+      </div>
+
+      <div class="chat" id="chat"><div class="empty">选择模型，输入消息开始对话</div></div>
+
+      <div class="inputbar">
+        <textarea id="input" rows="1" placeholder="输入消息，Enter 发送，Shift+Enter 换行"></textarea>
+        <button class="btn-primary" id="sendBtn">发送</button>
+      </div>
+    </section>
+
+    <!-- Metrics -->
+    <section id="metrics" hidden>
+      <div class="kpis" id="kpis"></div>
+      <div class="m-block">
+        <div class="sect">按模型</div>
+        <div id="byModel"></div>
+      </div>
+      <div class="m-block">
+        <div class="sect">最近调用 <span class="hint" id="metricsHint"></span></div>
+        <table>
+          <thead><tr><th>时间</th><th>模型</th><th>类型</th><th>状态</th><th>耗时</th><th>Tokens</th><th>重试</th></tr></thead>
+          <tbody id="recentBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Prompts -->
+    <section id="prompts" hidden>
+      <div class="p-layout">
+        <div class="p-list" id="promptList"></div>
+        <div>
+          <div class="card p-detail" id="promptDetail" hidden>
+            <h3 id="pdTitle"></h3>
+            <pre id="pdTemplate"></pre>
+            <div class="hint" id="pdMeta" style="margin:8px 0 12px"></div>
+            <button class="btn-primary" id="pdUse">在 Playground 中使用</button>
+          </div>
+          <div class="card">
+            <h3>发布新版本</h3>
+            <div class="row">
+              <input id="pubName" placeholder="模板名" spellcheck="false">
+              <input id="pubVersion" placeholder="版本，如 v1" spellcheck="false">
+            </div>
+            <textarea id="pubTemplate" placeholder="模板正文，使用 ${变量名} 作为占位符" spellcheck="false"></textarea>
+            <div class="row" style="margin-top:8px"><button class="btn-primary" id="pubBtn">发布</button></div>
+            <div class="form-err" id="pubErr" hidden></div>
+            <div class="form-ok" id="pubOk" hidden></div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script>
+'use strict';
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+async function api(path, options) {
+  const resp = await fetch(path, options);
+  if (!resp.ok) {
+    let err;
+    try { err = await resp.json(); } catch { err = { code: 'HTTP_' + resp.status, message: resp.statusText }; }
+    throw Object.assign(new Error(err.message || resp.statusText), { code: err.code || 'HTTP_' + resp.status });
+  }
+  return resp;
+}
+
+/* ---------- Tab 导航 ---------- */
+let metricsTimer = null;
+function switchTab(name) {
+  document.querySelectorAll('nav button').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
+  ['playground', 'metrics', 'prompts'].forEach((t) => { $(t).hidden = t !== name; });
+  if (metricsTimer) { clearInterval(metricsTimer); metricsTimer = null; }
+  if (name === 'metrics') { loadMetrics(); metricsTimer = setInterval(loadMetrics, 5000); }
+  if (name === 'prompts') loadPrompts();
+}
+document.querySelectorAll('nav button').forEach((b) => b.addEventListener('click', () => switchTab(b.dataset.tab)));
+
+/* ---------- Playground ---------- */
+const history = [];  // 多轮对话历史，以 messages 提交
+let sending = false;
+
+async function loadModels() {
+  try {
+    const data = await (await api('/models')).json();
+    $('modelSel').innerHTML = data.models.map((m) => `<option value="${esc(m)}"${m === data.default ? ' selected' : ''}>${esc(m)}</option>`).join('');
+  } catch {
+    $('modelSel').innerHTML = '<option value="deepseek">deepseek</option><option value="minimax">minimax</option>';
+  }
+}
+
+// 流式与结构化输出互斥：开流式时锁定 text
+$('streamToggle').addEventListener('change', (e) => {
+  const on = e.target.checked;
+  $('formatSel').disabled = on;
+  if (on) $('formatSel').value = 'text';
+  syncFormatPanel();
+});
+
+$('formatSel').addEventListener('change', syncFormatPanel);
+function syncFormatPanel() {
+  $('schemaPanel').hidden = $('formatSel').value !== 'json_schema';
+  $('schemaErr').hidden = true;
+}
+
+$('promptBtn').addEventListener('click', () => {
+  const p = $('promptPanel');
+  p.hidden = !p.hidden;
+  $('promptBtn').classList.toggle('on', !p.hidden);
+});
+
+// 模板名/版本变化后拉取模板，解析 ${变量} 生成输入框
+let varTimer = null;
+['promptName', 'promptVersion'].forEach((id) => $(id).addEventListener('input', () => {
+  clearTimeout(varTimer);
+  varTimer = setTimeout(loadPromptVars, 400);
+}));
+
+async function loadPromptVars() {
+  const name = $('promptName').value.trim();
+  const version = $('promptVersion').value.trim() || 'latest';
+  $('promptVars').innerHTML = '';
+  $('promptErr').hidden = true;
+  if (!name) return;
+  try {
+    const t = await (await api(`/prompts/${encodeURIComponent(name)}/${encodeURIComponent(version)}`)).json();
+    const vars = [...new Set([...t.template.matchAll(/\$\{([^}]+)\}/g)].map((m) => m[1]))];
+    $('promptVars').innerHTML = vars.map((v) => `<label>${esc(v)} <input data-var="${esc(v)}" spellcheck="false"></label>`).join('');
+  } catch (e) {
+    $('promptErr').textContent = `${e.code}: ${e.message}`;
+    $('promptErr').hidden = false;
+  }
+}
+
+function buildPayload() {
+  const payload = {
+    messages: [...history, { role: 'user', content: $('input').value.trim() }],
+    model: $('modelSel').value,
+  };
+  // 模板引用：面板展开且填了模板名才带上
+  if (!$('promptPanel').hidden && $('promptName').value.trim()) {
+    const variables = {};
+    document.querySelectorAll('#promptVars input').forEach((i) => { variables[i.dataset.var] = i.value; });
+    payload.prompt = { name: $('promptName').value.trim(), version: $('promptVersion').value.trim() || 'latest', variables };
+  }
+  return payload;
+}
+
+function buildResponseFormat() {
+  const type = $('formatSel').value;
+  if (type === 'text') return { type: 'text' };
+  if (type === 'json_object') return { type: 'json_object' };
+  let schema;
+  try {
+    schema = JSON.parse($('schemaInput').value);
+    $('schemaErr').hidden = true;
+  } catch (e) {
+    $('schemaErr').textContent = 'Schema 不是合法 JSON：' + e.message;
+    $('schemaErr').hidden = false;
+    throw e;
+  }
+  return { type: 'json_schema', json_schema: { name: 'response', strict: true, schema } };
+}
+
+function addBubble(role, html) {
+  const empty = $('chat').querySelector('.empty');
+  if (empty) empty.remove();
+  const div = document.createElement('div');
+  div.className = 'msg ' + role;
+  div.innerHTML = html;
+  $('chat').appendChild(div);
+  div.scrollIntoView({ block: 'nearest' });
+  return div;
+}
+
+function metaLine(parts) {
+  return `<div class="meta">${parts.filter(Boolean).join(' · ')}</div>`;
+}
+
+function usageText(u) {
+  return u ? `${u.prompt} in / ${u.completion} out` : null;
+}
+
+async function sendMessage() {
+  const text = $('input').value.trim();
+  if (!text || sending) return;
+  let payload;
+  try {
+    payload = buildPayload();
+    if (!$('streamToggle').checked) payload.response_format = buildResponseFormat();
+  } catch { return; }  // schema 校验失败，错误已展示
+
+  sending = true;
+  $('sendBtn').disabled = true;
+  $('input').value = '';
+  $('input').style.height = 'auto';
+  addBubble('user', esc(text));
+
+  const stream = $('streamToggle').checked;
+  const startedAt = performance.now();
+  try {
+    if (stream) await sendStream(payload);
+    else await sendComplete(payload);
+    history.push({ role: 'user', content: text });
+  } catch (e) {
+    addBubble('ai err', `${esc(e.code)}: ${esc(e.message)}`);
+  } finally {
+    sending = false;
+    $('sendBtn').disabled = false;
+    $('input').focus();
+  }
+  void startedAt;
+}
+
+async function sendComplete(payload) {
+  const data = await (await api('/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })).json();
+  let html = esc(data.reply);
+  if (data.data !== null && data.data !== undefined) {
+    html += `<pre class="json">${esc(JSON.stringify(data.data, null, 2))}</pre>`;
+  }
+  html += metaLine([
+    esc(data.model),
+    (data.latency_ms / 1000).toFixed(2) + 's',
+    usageText(data.usage),
+    data.attempts > 1 ? `重试 ${data.attempts - 1}` : null,
+    `<code>${esc(data.request_id.slice(0, 8))}</code>`,
+  ]);
+  addBubble('ai', html);
+  history.push({ role: 'assistant', content: data.reply });
+}
+
+// POST 形式的 SSE：fetch + ReadableStream 手动分帧
+async function sendStream(payload) {
+  const resp = await api('/stream', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const bubble = addBubble('ai', '<span class="txt"></span><span class="cursor"></span>');
+  const txt = bubble.querySelector('.txt');
+  let reply = '';
+  let done = null;
+
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  for (;;) {
+    const { done: finished, value } = await reader.read();
+    if (finished) break;
+    buf += decoder.decode(value, { stream: true });
+    let idx;
+    while ((idx = buf.indexOf('\n\n')) >= 0) {
+      const frame = buf.slice(0, idx);
+      buf = buf.slice(idx + 2);
+      for (const line of frame.split('\n')) {
+        if (!line.startsWith('data: ')) continue;
+        const raw = line.slice(6);
+        if (raw === '[DONE]') continue;
+        const ev = JSON.parse(raw);
+        if (ev.type === 'content.delta') {
+          reply += ev.delta;
+          txt.textContent = reply;
+          bubble.scrollIntoView({ block: 'nearest' });
+        } else if (ev.type === 'response.completed') {
+          done = ev;
+        } else if (ev.type === 'response.failed') {
+          throw Object.assign(new Error(ev.error.message), { code: ev.error.code });
+        }
+      }
+    }
+  }
+  bubble.querySelector('.cursor')?.remove();
+  if (done) {
+    bubble.insertAdjacentHTML('beforeend', metaLine([
+      esc(done.model),
+      (done.latency_ms / 1000).toFixed(2) + 's',
+      usageText(done.usage),
+      `<code>${esc(done.request_id.slice(0, 8))}</code>`,
+    ]));
+  }
+  history.push({ role: 'assistant', content: reply });
+}
+
+$('sendBtn').addEventListener('click', sendMessage);
+$('input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+});
+$('input').addEventListener('input', (e) => {
+  e.target.style.height = 'auto';
+  e.target.style.height = Math.min(e.target.scrollHeight, 140) + 'px';
+});
+
+/* ---------- Metrics ---------- */
+const fmtMs = (ms) => (ms === null || ms === undefined ? '—' : (ms / 1000).toFixed(2) + 's');
+const fmtInt = (n) => (n >= 10000 ? (n / 1000).toFixed(1) + 'k' : String(n));
+
+async function loadMetrics() {
+  let m;
+  try {
+    m = await (await api('/metrics')).json();
+  } catch {
+    return;
+  }
+  const t = m.total;
+  const rate = t.calls.total ? ((t.calls.success / t.calls.total) * 100).toFixed(1) + '%' : '—';
+  $('kpis').innerHTML = [
+    [fmtInt(t.calls.total), '总调用'],
+    [rate, '成功率'],
+    [fmtInt(t.tokens.total), 'Tokens'],
+    [fmtMs(t.latency_ms.avg), '平均延迟'],
+    [fmtMs(t.first_token_ms.avg), '平均首 Token'],
+    ['$' + t.cost_usd.toFixed(4), '累计成本'],
+  ].map(([v, l]) => `<div class="kpi"><div class="v">${v}</div><div class="l">${l}</div></div>`).join('');
+
+  const models = Object.entries(m.by_model);
+  const maxCalls = Math.max(1, ...models.map(([, a]) => a.calls.total));
+  $('byModel').innerHTML = models.length ? models.map(([name, a]) => `
+    <div class="mrow">
+      <span class="name">${esc(name)}</span>
+      <span class="track"><span class="fill" style="display:block;width:${Math.round((a.calls.total / maxCalls) * 100)}%"></span></span>
+      <span class="val">${a.calls.total} 次 · 平均 ${fmtMs(a.latency_ms.avg)} · 首 token ${fmtMs(a.first_token_ms.avg)}</span>
+    </div>`).join('') : '<div class="hint">暂无数据</div>';
+
+  const recent = [...m.recent].reverse();
+  $('recentBody').innerHTML = recent.length ? recent.map((r) => `
+    <tr>
+      <td class="mono">${new Date(r.timestamp).toLocaleTimeString('zh-CN', { hour12: false })}</td>
+      <td class="mono">${esc(r.model)}</td>
+      <td><span class="badge">${r.stream ? 'stream' : 'chat'}</span></td>
+      <td>${r.success ? '<span class="badge ok">成功</span>' : `<span class="badge err">${esc(r.error_code || '失败')}</span>`}</td>
+      <td class="mono">${fmtMs(r.latency_ms)}${r.first_token_ms != null ? ` · 首 ${fmtMs(r.first_token_ms)}` : ''}</td>
+      <td class="mono">${r.tokens ? r.tokens.total : '—'}</td>
+      <td class="mono">${r.retries || ''}</td>
+    </tr>`).join('') : '<tr><td colspan="7" class="hint">暂无调用</td></tr>';
+  $('metricsHint').textContent = '每 5s 自动刷新';
+}
+
+/* ---------- Prompts ---------- */
+let selectedPrompt = null;  // {name, version, template}
+
+async function loadPrompts() {
+  let list;
+  try {
+    list = await (await api('/prompts')).json();
+  } catch (e) {
+    $('promptList').innerHTML = `<div class="p-name">${esc(e.code)}: ${esc(e.message)}</div>`;
+    return;
+  }
+  if (!list.length) {
+    $('promptList').innerHTML = '<div class="p-name">暂无模板</div>';
+    return;
+  }
+  const groups = {};
+  for (const t of list) (groups[t.name] ||= []).push(t);
+  $('promptList').innerHTML = Object.entries(groups).map(([name, vers]) => `
+    <div class="p-group">
+      <div class="p-name">${esc(name)}</div>
+      ${vers.map((t) => `
+        <button class="p-ver" data-name="${esc(name)}" data-version="${esc(t.version)}">
+          ${esc(t.version)}${t.is_latest ? '<span class="latest">latest</span>' : ''}
+        </button>`).join('')}
+    </div>`).join('');
+  $('promptList').querySelectorAll('.p-ver').forEach((b) =>
+    b.addEventListener('click', () => showPrompt(b.dataset.name, b.dataset.version)));
+}
+
+async function showPrompt(name, version) {
+  try {
+    const t = await (await api(`/prompts/${encodeURIComponent(name)}/${encodeURIComponent(version)}`)).json();
+    selectedPrompt = t;
+    $('promptList').querySelectorAll('.p-ver').forEach((b) =>
+      b.classList.toggle('sel', b.dataset.name === name && b.dataset.version === version));
+    $('promptDetail').hidden = false;
+    $('pdTitle').textContent = `${t.name}@${t.version}`;
+    $('pdTemplate').textContent = t.template;
+    $('pdMeta').textContent = `发布于 ${new Date(t.created_at).toLocaleString('zh-CN')}${t.is_latest ? ' · 最新版本' : ''}`;
+  } catch (e) {
+    $('promptDetail').hidden = true;
+    alert(`${e.code}: ${e.message}`);
+  }
+}
+
+$('pdUse').addEventListener('click', () => {
+  if (!selectedPrompt) return;
+  switchTab('playground');
+  $('promptPanel').hidden = false;
+  $('promptBtn').classList.add('on');
+  $('promptName').value = selectedPrompt.name;
+  $('promptVersion').value = selectedPrompt.version;
+  loadPromptVars();
+});
+
+$('pubBtn').addEventListener('click', async () => {
+  $('pubErr').hidden = true;
+  $('pubOk').hidden = true;
+  const body = {
+    name: $('pubName').value.trim(),
+    version: $('pubVersion').value.trim(),
+    template: $('pubTemplate').value,
+  };
+  try {
+    const t = await (await api('/prompts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })).json();
+    $('pubOk').textContent = `已发布 ${t.name}@${t.version}`;
+    $('pubOk').hidden = false;
+    $('pubVersion').value = '';
+    await loadPrompts();
+    showPrompt(t.name, t.version);
+  } catch (e) {
+    $('pubErr').textContent = `${e.code}: ${e.message}`;
+    $('pubErr').hidden = false;
+  }
+});
+
+/* ---------- 启动 ---------- */
+loadModels();
+$('input').focus();
+</script>
+</body>
+</html>
