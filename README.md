@@ -14,11 +14,15 @@
 ## 功能
 
 - **统一抽象层**：`app/adapters/` 定义统一 `LLMAdapter` 接口，`ADAPTER_REGISTRY` + `MODEL_CONFIGS[model].protocol` 完成动态路由。
-- **流式输出**：`POST /stream`，SSE（`data: {...}` + `[DONE]`），并自动剥离 `<think>...</think>` 推理块。
+- **多轮消息**：`message`（单条简写）与 `messages`（多轮，含 system / user / assistant 角色）二选一，角色原样透传上游。
+- **流式输出**：`POST /stream`，标准 SSE 事件序列 `response.created` → `content.delta`* → `response.completed`（含真实 usage 与延迟），异常时下发 `response.failed`；自动剥离 `<think>...</think>` 推理块。
 - **结构化输出**：`response_format` 支持 `text` / `json_object` / `json_schema`；上游不支持原生 `json_schema` 时自动降级为 `json_object` 并注入 schema 说明，网关侧用 `jsonschema` 二次校验。
 - **提示词版本管理**：模板按 `name@version` 存储，`latest` 解析为最新版本，支持 `${变量}` 替换；版本不可覆盖。
-- **可观测性**：记录 prompt / completion / total / cached / reasoning Token、总延迟、首 Token 延迟、重试次数；`GET /metrics` 返回全局、按模型、最近调用明细。
+- **可观测性**：每次调用生成 `request_id`（主备多次尝试共享，可串联 `/metrics` 明细）；记录 prompt / completion / total / cached / reasoning Token、总延迟、首 Token 延迟、重试次数、主备切换次数与成本；`GET /metrics` 返回全局、按模型、最近调用明细。
+- **主备切换**：`MODEL_CONFIGS[model].fallback_model` 配置备用链（deepseek → minimax），主模型重试耗尽后自动切换；仅上游故障（超时 / 5xx / 网络错误）触发，本网关 429 与输出契约错误不切换；流式已产出内容后不再切换。
+- **成本核算**：按模型价格表（`input/output_price_per_million`）折算每次调用 `cost_usd`，并在 `/metrics` 聚合累计。
 - **韧性**：统一错误码；指数退避重试（0.5s → 1s → 2s，最多重试 3 次，仅 408/429/5xx 与网络类异常）；按模型独立滑动窗口限流，超限返回 `429` + `Retry-After`。
+- **请求级超时**：`timeout_seconds`（默认 30，范围 0–120）逐请求下传上游，重试与主备切换的每次尝试均生效。
 
 ## 启动
 
@@ -48,8 +52,10 @@ EOF
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| POST | `/chat` | 一次性返回完整回答，支持 `response_format` 与 `prompt` 版本引用 |
-| POST | `/stream` | SSE 流式回答，支持 `prompt` 版本引用（不支持 `response_format`） |
+| GET | `/` | 零依赖 Web 控制台（浏览器直接对话、看指标） |
+| GET | `/models` | 可用模型列表与默认模型 |
+| POST | `/chat` | 一次性返回完整回答，支持多轮 `messages`、`response_format`、`prompt` 版本引用与 `timeout_seconds` |
+| POST | `/stream` | SSE 流式回答，支持 `prompt` 版本引用与 `timeout_seconds`（不支持 `response_format`） |
 | POST | `/prompts` | 发布一个模板版本 |
 | GET | `/prompts?name=` | 列出模板版本 |
 | GET | `/prompts/{name}/{version}` | 查询模板详情，`version` 可传 `latest` |
@@ -64,10 +70,40 @@ curl -s http://127.0.0.1:8000/chat \
 ```
 
 ```json
-{"reply": "你好", "data": null}
+{
+  "reply": "你好",
+  "data": null,
+  "request_id": "ab207269-6e6f-4f2f-9a3d-0f3f2c1e9a11",
+  "model": "deepseek",
+  "usage": {"prompt": 37, "completion": 60, "total": 97, "cached": 0, "reasoning": 46},
+  "latency_ms": 2550,
+  "attempts": 1
+}
 ```
 
-### 2. 流式输出
+`model` 为实际应答模型（发生主备切换时与请求模型不同）；`attempts` 为上游调用总次数（含重试与切换）；`request_id` 可在 `/metrics` 明细中串联本次调用。
+
+### 2. 多轮消息与请求级超时
+
+`messages` 支持 system / user / assistant 三种角色，与 `message` 二选一：
+
+```bash
+curl -s http://127.0.0.1:8000/chat \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model": "deepseek",
+    "messages": [
+      {"role": "user", "content": "请记住数字 42，只回答：好"},
+      {"role": "assistant", "content": "好"},
+      {"role": "user", "content": "我刚才让你记住的数字是什么？只回答数字"}
+    ],
+    "timeout_seconds": 60
+  }'
+```
+
+`timeout_seconds` 逐请求生效（默认 30，范围 0–120），越界返回 `422`。
+
+### 3. 流式输出
 
 ```bash
 curl -N -s http://127.0.0.1:8000/stream \
@@ -76,13 +112,20 @@ curl -N -s http://127.0.0.1:8000/stream \
 ```
 
 ```
-data: {"content": "1"}
-data: {"content": ",2"}
+data: {"type": "response.created", "request_id": "0c94744d-...", "model": "minimax"}
+
+data: {"type": "content.delta", "delta": "1"}
+
+data: {"type": "content.delta", "delta": ",2"}
+
 ...
-data: [DONE]
+
+data: {"type": "response.completed", "model": "minimax", "request_id": "0c94744d-...", "usage": {"prompt": 206, "completion": 59, "total": 265, "cached": 205, "reasoning": 47}, "latency_ms": 1573}
 ```
 
-### 3. 结构化输出
+`response.completed` 携带真实 Token 用量与总延迟；流建立后的异常以 `{"type": "response.failed", "error": {...}}` 事件下发。
+
+### 4. 结构化输出
 
 JSON 对象：
 
@@ -97,7 +140,7 @@ curl -s http://127.0.0.1:8000/chat \
 ```
 
 ```json
-{"reply": "{\"name\": \"张三\", \"age\": 30}", "data": {"name": "张三", "age": 30}}
+{"reply": "{\"name\": \"张三\", \"age\": 30}", "data": {"name": "张三", "age": 30}, "request_id": "...", "model": "deepseek", "usage": {"prompt": 80, "completion": 12, "total": 92, "cached": 0, "reasoning": 0}, "latency_ms": 1820, "attempts": 1}
 ```
 
 JSON Schema（当前两个模型会降级为 json_object，但仍会按 schema 校验）：
@@ -128,7 +171,7 @@ curl -s http://127.0.0.1:8000/chat \
 
 模型输出非法 JSON 或不符合 schema 时返回 `502 INVALID_MODEL_OUTPUT`。
 
-### 4. 提示词版本
+### 5. 提示词版本
 
 发布并引用模板：
 
@@ -160,7 +203,7 @@ curl -s http://127.0.0.1:8000/prompts/demo/latest
 
 内置模板 `knowledge_decision@v1` 可直接引用。
 
-### 5. 可观测数据
+### 6. 可观测数据
 
 ```bash
 curl -s http://127.0.0.1:8000/metrics | python3 -m json.tool
@@ -171,22 +214,28 @@ curl -s http://127.0.0.1:8000/metrics | python3 -m json.tool
 ```json
 {
   "total": {
-    "calls": {"total": 8, "success": 8, "failure": 0, "stream": 1, "complete": 7, "retries": 2},
-    "tokens": {"calls_with_usage": 8, "prompt": 955, "completion": 338, "total": 1293, "cached": 562, "reasoning": 289},
-    "latency_ms": {"avg": 3063.28, "max": 5516.38},
-    "first_token_ms": {"avg": 1895.28, "max": 1895.28}
+    "calls": {"total": 8, "success": 8, "failure": 0, "stream": 1, "complete": 7, "retries": 2, "fallbacks": 1},
+    "tokens": {"calls_with_usage": 8, "prompt": 1013, "completion": 368, "total": 1381, "cached": 434, "reasoning": 311},
+    "latency_ms": {"avg": 1661.07, "max": 5516.38},
+    "first_token_ms": {"avg": 1396.74, "max": 1396.74},
+    "cost_usd": 0.000711
   },
   "by_model": {"deepseek": {}, "minimax": {}},
   "recent": [
-    {"timestamp": "...", "model": "minimax", "stream": true, "success": true,
-     "latency_ms": 2201.5, "first_token_ms": 1895.28, "tokens": {}, "retries": 0, "error_code": null}
+    {"timestamp": "...", "request_id": "0c94744d-...", "requested_model": "minimax",
+     "prompt_name": "verify_demo", "prompt_version": "v1",
+     "model": "minimax", "stream": true, "success": true,
+     "latency_ms": 1573.0, "first_token_ms": 1396.74, "tokens": {}, "retries": 0,
+     "error_code": null, "cost_usd": 0.000021}
   ]
 }
 ```
 
+`requested_model` 与 `model` 不同即发生了主备切换；`prompt_name/prompt_version` 记录引用的模板版本（`latest` 会解析为具体版本），便于按模板归因质量与成本。
+
 每次调用同时会输出一条 `llm_call` 结构化日志，便于外部采集。
 
-### 6. 限流
+### 7. 限流
 
 单模型每分钟限额在 `app/config/settings.py` 配置（默认 deepseek 60、minimax 30）。超限：
 
@@ -194,7 +243,15 @@ curl -s http://127.0.0.1:8000/metrics | python3 -m json.tool
 {"code": "RATE_LIMITED", "message": "模型 minimax 请求过于频繁，限额 30 次/分钟，请 30 秒后重试"}
 ```
 
-响应头带 `Retry-After`（秒）。
+响应头带 `Retry-After`（秒）。触发限流不会引发主备切换（429 是配额治理决策，调用方应按 `Retry-After` 退避）。
+
+### 8. 主备切换与成本核算
+
+`app/config/settings.py` 中每个模型可配置 `fallback_model` 与价格表：
+
+- 主模型重试耗尽后自动切换备用模型，响应的 `model` 字段反映实际应答模型，`attempts` 计入全部尝试。
+- 每次调用按 `input/output_price_per_million` 折算 `cost_usd`，写入 `/metrics` 明细与聚合（含 `fallbacks` 切换次数）。
+- 主备链在启动时校验：指向未配置模型会直接报错。
 
 ## 错误码
 
@@ -209,7 +266,7 @@ curl -s http://127.0.0.1:8000/metrics | python3 -m json.tool
 | `INVALID_MODEL_OUTPUT` | 502 | 模型输出不是合法 JSON 或不符合 schema |
 | `INTERNAL_ERROR` | 500 | 未处理异常 |
 
-流式接口在响应建立后的异常会以 `data: {"error": {...}}` 事件下发，随后仍发送 `[DONE]`。
+流式接口在响应建立后的异常会以 `{"type": "response.failed", "error": {...}}` 事件下发。
 
 ## 验证
 
@@ -217,14 +274,17 @@ curl -s http://127.0.0.1:8000/metrics | python3 -m json.tool
 ./.venv/bin/python tests/verify.py
 ```
 
-脚本会真实调用两个上游，并覆盖 20 个检查点：
+脚本会真实调用两个上游，覆盖 31 个检查点（重试 / 限流 / 主备切换通过进程内替身与临时配置验证，不额外消耗上游配额）：
 
-1. 统一路由：`deepseek` / `minimax` 均可调用
-2. 流式：SSE 分块、`[DONE]`、推理块不泄漏
-3. 结构化：json_object、json_schema + schema 校验、非法 JSON 拦截
-4. 模板：发布、latest、变量替换、缺变量 400、未知版本 404
-5. 可观测：Token 分类、按模型分组、首 Token 延迟、重试计数
-6. 韧性：指数退避重试（含 HTTP 层 + 指标留痕）、429 + Retry-After
+1. 统一路由：`deepseek` / `minimax` 均可调用；响应字段（request_id / usage / latency_ms / attempts）完整
+2. 多轮消息：多角色上下文生效；`message` 与 `messages` 互斥（422）
+3. 流式：标准 SSE 事件序列（response.created / content.delta / response.completed）、真实 usage、推理块不泄漏
+4. 结构化：json_object、json_schema + schema 校验、非法 JSON 拦截（502）
+5. 模板：发布、latest、变量替换、指标记录模板版本、缺变量 400、未知版本 404
+6. 可观测：Token 分类、按模型分组、首 Token 延迟、重试计数、成本累计
+7. 韧性：指数退避重试（含 HTTP 层 + 指标留痕）、429 + Retry-After
+8. 主备切换：主模型故障切备用、同一 request_id 串联两次尝试、成本按价格表折算
+9. 请求超时：自定义超时生效、越界值 422
 
 全部通过时以退出码 0 结束，失败项会列在末尾。
 
@@ -233,12 +293,13 @@ curl -s http://127.0.0.1:8000/metrics | python3 -m json.tool
 ```
 app/
   adapters/        统一接口 + OpenAI / Anthropic 适配器与协议注册表
-  api/v1/          chat / stream / prompts / metrics 路由
-  application/     应用服务：校验、限流、重试、结构化校验、指标编排
-  config/          模型、模板与全局配置
+  api/v1/          chat / stream / prompts / metrics / models 路由
+  application/     应用服务：校验、限流、重试、主备切换、结构化校验、指标编排
+  config/          模型（含主备链与价格表）、模板与全局配置
   core/            统一错误码与异常处理器
   schemas/         Pydantic 入参/出参模型
   services/        重试、限流、指标、模板版本仓库
+static/index.html  零依赖 Web 控制台（GET / 直接返回）
 tests/verify.py    验收脚本
 main.py            FastAPI 入口
 ```
