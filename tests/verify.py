@@ -21,9 +21,9 @@ load_dotenv(ROOT / ".env")
 from fastapi.testclient import TestClient  # noqa: E402
 
 import app.application.chat_app_service as chat_app_module  # noqa: E402
-import app.config.settings as settings  # noqa: E402
 import main  # noqa: E402
 from app.adapters.base import Completion, TokenUsage  # noqa: E402
+from app.services.model_registry import model_registry  # noqa: E402
 from app.services.rate_limit_service import rate_limit_service  # noqa: E402
 from app.services.retry_service import RetryService  # noqa: E402
 
@@ -399,7 +399,7 @@ def check_retry() -> None:
 
 def check_rate_limit() -> None:
     """6b. 按模型独立限流：超限返回 429 + Retry-After。"""
-    config = settings.MODEL_CONFIGS["minimax"]
+    config = model_registry.require("minimax")
     original_limit = config.rate_limit_per_minute
     rate_limit_service._hits["minimax"].clear()  # 清空历史窗口，保证可复现
     object.__setattr__(config, "rate_limit_per_minute", 1)
@@ -472,7 +472,7 @@ def check_fallback_and_cost() -> None:
             f"recent={[(r['model'], r['success']) for r in last_two]}",
         )
 
-        minimax_price = settings.MODEL_CONFIGS["minimax"]
+        minimax_price = model_registry.require("minimax")
         expected = (
             10 * minimax_price.input_price_per_million
             + 5 * minimax_price.output_price_per_million

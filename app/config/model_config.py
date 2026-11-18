@@ -22,3 +22,5 @@ class ModelConfig:
     # 计价单价：美元 / 百万 Token，成本核算按实际用量折算
     input_price_per_million: float = 0.0
     output_price_per_million: float = 0.0
+    # 管理页面展示名称，留空时回退为模型 id
+    display_name: str = ""

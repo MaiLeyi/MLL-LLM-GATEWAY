@@ -7,6 +7,7 @@ class ErrorCode(Enum):
     INVALID_REQUEST = ("INVALID_REQUEST", 400, "请求参数不合法")
     NOT_FOUND = ("NOT_FOUND", 404, "资源不存在")
     UNSUPPORTED_MODEL = ("UNSUPPORTED_MODEL", 400, "不支持的模型")
+    MISSING_API_KEY = ("MISSING_API_KEY", 400, "模型未配置 API Key")
     RATE_LIMITED = ("RATE_LIMITED", 429, "请求过于频繁")
     UPSTREAM_TIMEOUT = ("UPSTREAM_TIMEOUT", 504, "上游模型调用超时")
     UPSTREAM_ERROR = ("UPSTREAM_ERROR", 502, "上游模型调用失败")

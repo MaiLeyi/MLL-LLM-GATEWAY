@@ -13,13 +13,15 @@
 
 ## 功能
 
-- **统一抽象层**：`app/adapters/` 定义统一 `LLMAdapter` 接口，`ADAPTER_REGISTRY` + `MODEL_CONFIGS[model].protocol` 完成动态路由。
+- **统一抽象层**：`app/adapters/` 定义统一 `LLMAdapter` 接口，`ADAPTER_REGISTRY` + 运行时模型注册表的 `protocol` 完成动态路由。
+- **模型配置管理**：控制台 Models 页面以卡片展示已配置模型，支持新增、编辑、删除、设为默认，并可发起真实的上游可用性测试；配置保存到用户数据目录 `models.json`，热更新生效。
+- **API Key 存储**：界面填写的 Key 写入 macOS 系统钥匙串，`models.json` 只保存非敏感字段；未写入钥匙串时回退读取 `.env`，所有接口仅返回掩码。
 - **多轮消息**：`message`（单条简写）与 `messages`（多轮，含 system / user / assistant 角色）二选一，角色原样透传上游。
 - **流式输出**：`POST /stream`，标准 SSE 事件序列 `response.created` → `content.delta`* → `response.completed`（含真实 usage 与延迟），异常时下发 `response.failed`；自动剥离 `<think>...</think>` 推理块。
 - **结构化输出**：`response_format` 支持 `text` / `json_object` / `json_schema`；上游不支持原生 `json_schema` 时自动降级为 `json_object` 并注入 schema 说明，网关侧用 `jsonschema` 二次校验。
 - **提示词版本管理**：模板按 `name@version` 存储，`latest` 解析为最新版本，支持 `${变量}` 替换；版本不可覆盖。
 - **可观测性**：每次调用生成 `request_id`（主备多次尝试共享，可串联 `/metrics` 明细）；记录 prompt / completion / total / cached / reasoning Token、总延迟、首 Token 延迟、重试次数、主备切换次数与成本；`GET /metrics` 返回全局、按模型、最近调用明细。
-- **主备切换**：`MODEL_CONFIGS[model].fallback_model` 配置备用链（deepseek → minimax），主模型重试耗尽后自动切换；仅上游故障（超时 / 5xx / 网络错误）触发，本网关 429 与输出契约错误不切换；流式已产出内容后不再切换。
+- **主备切换**：模型配置中的 `fallback_model` 组成备用链（默认 deepseek → minimax），主模型重试耗尽后自动切换；仅上游故障（超时 / 5xx / 网络错误）触发，本网关 429 与输出契约错误不切换；流式已产出内容后不再切换。
 - **成本核算**：按模型价格表（`input/output_price_per_million`）折算每次调用 `cost_usd`，并在 `/metrics` 聚合累计。
 - **韧性**：统一错误码；指数退避重试（0.5s → 1s → 2s，最多重试 3 次，仅 408/429/5xx 与网络类异常）；按模型独立滑动窗口限流，超限返回 `429` + `Retry-After`。
 - **请求级超时**：`timeout_seconds`（默认 30，范围 0–120）逐请求下传上游，重试与主备切换的每次尝试均生效。
@@ -46,14 +48,19 @@ EOF
 ./.venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-启动时会校验默认模型（`deepseek`）的 Key，缺失会直接报错，避免服务起来却无法应答。
+启动时不再强制校验模型 Key；请求时若缺失会返回 `400 MISSING_API_KEY`，可在控制台 Models 页面填写（存入 macOS 钥匙串），或在 `.env` 中配置。
 
 ## 接口
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/` | 零依赖 Web 控制台（浏览器直接对话、看指标） |
-| GET | `/models` | 可用模型列表与默认模型 |
+| GET | `/models` | 可用模型 id、默认模型与卡片详情（Key 仅返回掩码） |
+| POST | `/models` | 新增模型配置 |
+| PUT | `/models/{id}` | 更新模型配置 |
+| DELETE | `/models/{id}` | 删除模型（默认模型或被引用为备用时拒绝） |
+| POST | `/models/{id}/default` | 设为默认模型 |
+| POST | `/models/{id}/test` | 真实调用上游做一次最小可用性测试 |
 | POST | `/chat` | 一次性返回完整回答，支持多轮 `messages`、`response_format`、`prompt` 版本引用与 `timeout_seconds` |
 | POST | `/stream` | SSE 流式回答，支持 `prompt` 版本引用与 `timeout_seconds`（不支持 `response_format`） |
 | POST | `/prompts` | 发布一个模板版本 |

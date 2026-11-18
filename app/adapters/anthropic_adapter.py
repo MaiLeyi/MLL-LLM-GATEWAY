@@ -13,7 +13,7 @@ from app.adapters.base import (
     build_json_instruction,
 )
 from app.config.model_config import ModelConfig
-from app.config.settings import SYSTEM_PROMPT, get_api_key
+from app.config.settings import SYSTEM_PROMPT
 
 ANTHROPIC_VERSION = "2023-06-01"
 MAX_TOKENS = 4096
@@ -23,10 +23,10 @@ TIMEOUT_SECONDS = 60
 class AnthropicAdapter(LLMAdapter):
     """Anthropic Messages 协议适配器：x-api-key 鉴权、system 顶层字段、content 块返回。"""
 
-    def __init__(self, model_id: str, config: ModelConfig):
+    def __init__(self, config: ModelConfig, api_key: str):
         self._provider_model = config.provider_model  # 上游实际模型名称
         self._base_url = config.base_url.rstrip("/")  # 去除尾部斜杠的上游接口地址
-        self._api_key = get_api_key(model_id)  # 上游鉴权 Key
+        self._api_key = api_key  # 上游鉴权 Key，由注册表从钥匙串或环境变量解析
 
     def _headers(self) -> dict[str, str]:
         return {

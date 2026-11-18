@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.adapters.base import TokenUsage
-from app.config.settings import MODEL_CONFIGS
+from app.services.model_registry import model_registry
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +19,7 @@ def calculate_cost(model_id: str, usage: TokenUsage | None) -> float | None:
     """按模型定价与 Token 消耗折算本次调用成本（美元）；无 usage 时返回 None。"""
     if usage is None:
         return None
-    config = MODEL_CONFIGS.get(model_id)
+    config = model_registry.get(model_id)
     if config is None:
         return None
     return (

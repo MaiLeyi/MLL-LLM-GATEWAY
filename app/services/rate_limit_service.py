@@ -3,8 +3,9 @@ import math
 import time
 from collections import defaultdict, deque
 
-from app.config.settings import MODEL_CONFIGS, RATE_LIMIT_WINDOW_SECONDS
+from app.config.settings import RATE_LIMIT_WINDOW_SECONDS
 from app.core.exceptions import RateLimitedException
+from app.services.model_registry import model_registry
 
 
 class RateLimitService:
@@ -18,7 +19,7 @@ class RateLimitService:
     async def check(self, model_id: str) -> None:
         """校验该模型是否还有配额，超限时抛出 Retry-After 提示的 429。"""
         # 1. 读取该模型的限流配置
-        config = MODEL_CONFIGS[model_id]
+        config = model_registry.require(model_id)
         if config.rate_limit_per_minute <= 0:
             # 1.1 限额 <= 0 表示不限制，直接放行
             return

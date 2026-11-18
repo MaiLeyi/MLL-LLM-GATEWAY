@@ -14,7 +14,7 @@ from app.adapters.base import (
     build_json_instruction,
 )
 from app.config.model_config import ModelConfig
-from app.config.settings import SYSTEM_PROMPT, get_api_key
+from app.config.settings import SYSTEM_PROMPT
 
 # 部分 OpenAI 兼容推理模型（如 MiniMax）会把推理过程包在 <think> 块里，
 # 统一在这里剥离，避免污染结构化输出解析和流式正文。
@@ -77,9 +77,9 @@ class _ThinkFilter:
 class OpenAIAdapter(LLMAdapter):
     """OpenAI Chat Completions 协议适配器，适用于 DeepSeek、MiniMax 等兼容实现。"""
 
-    def __init__(self, model_id: str, config: ModelConfig):
+    def __init__(self, config: ModelConfig, api_key: str):
         self._provider_model = config.provider_model  # 上游实际模型名称
-        self._api_key = get_api_key(model_id)  # 上游鉴权 Key
+        self._api_key = api_key  # 上游鉴权 Key，由注册表从钥匙串或环境变量解析
         self._base_url = config.base_url  # 上游接口地址
         self._structured_output_mode = (
             config.structured_output_mode

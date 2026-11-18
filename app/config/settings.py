@@ -1,4 +1,3 @@
-import os
 import sys
 from pathlib import Path
 
@@ -11,6 +10,8 @@ BASE_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[2]))
 load_dotenv(BASE_DIR / ".env")
 
 
+# 内置种子配置：首次启动时写入用户数据目录的 models.json，
+# 之后以 models.json 为准，可在管理页面动态增删改。
 MODEL_CONFIGS: dict[str, ModelConfig] = {
     "deepseek": ModelConfig(
         provider_model="deepseek-flash",
@@ -25,6 +26,7 @@ MODEL_CONFIGS: dict[str, ModelConfig] = {
         # 参考 DeepSeek 官方价（缓存未命中），如有调整以官网为准
         input_price_per_million=0.27,
         output_price_per_million=1.10,
+        display_name="DeepSeek",
     ),
     "minimax": ModelConfig(
         provider_model="MiniMax-M3",
@@ -37,10 +39,11 @@ MODEL_CONFIGS: dict[str, ModelConfig] = {
         # 占位价格，请按 MiniMax 官网最新价格调整
         input_price_per_million=0.30,
         output_price_per_million=1.20,
+        display_name="MiniMax",
     ),
 }
 
-# 启动时校验主备链配置，避免指向不存在的模型
+# 启动时校验种子配置的主备链，避免指向不存在的模型
 for _model_id, _config in MODEL_CONFIGS.items():
     if _config.fallback_model is not None and _config.fallback_model not in MODEL_CONFIGS:
         raise RuntimeError(
@@ -61,14 +64,3 @@ DEFAULT_MODEL = "deepseek"
 
 HOST = "0.0.0.0"
 PORT = 8000
-
-
-def get_api_key(model_id: str) -> str:
-    api_key = os.getenv(MODEL_CONFIGS[model_id].api_key_env)
-    if not api_key:
-        raise RuntimeError(f"{MODEL_CONFIGS[model_id].api_key_env} NOT EXISTS")
-    return api_key
-
-
-# 默认模型的 Key 在启动时校验，避免服务起来却无法应答
-get_api_key(DEFAULT_MODEL)

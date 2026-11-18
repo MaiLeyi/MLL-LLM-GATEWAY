@@ -3,8 +3,8 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.adapters.base import ChatMessage
-from app.config.settings import DEFAULT_MODEL
 from app.schemas.prompt import PromptSelection
+from app.services.model_registry import model_registry
 
 
 class Message(BaseModel):
@@ -81,7 +81,9 @@ class ChatInput(BaseModel):
     messages: list[Message] | None = Field(
         default=None, min_length=1, max_length=100, description="多轮对话消息"
     )  # 多轮对话消息（含 system/assistant 角色），与 message 二选一
-    model: str = Field(default=DEFAULT_MODEL, description="模型 id")  # 目标模型 id
+    model: str = Field(
+        default_factory=lambda: model_registry.default_model, description="模型 id"
+    )  # 目标模型 id，未传时使用当前默认模型
     prompt: PromptSelection | None = Field(
         default=None, description="引用的 Prompt 模板版本；不传则使用默认系统提示词"
     )  # 模板版本引用与变量

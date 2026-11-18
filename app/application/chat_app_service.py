@@ -10,17 +10,16 @@ from jsonschema import ValidationError, validate
 
 from app.adapters.base import ChatMessage, LLMAdapter, StreamChunk, TokenUsage
 from app.adapters.llm import get_adapter
-from app.config.settings import MODEL_CONFIGS
 from app.core.exceptions import (
     AppException,
     InvalidModelOutputException,
-    UnsupportedModelException,
     UpstreamException,
     UpstreamTimeoutException,
 )
 from app.schemas.chat import ResponseFormat
 from app.schemas.prompt import PromptSelection
 from app.services.metrics_service import CallMetrics, metrics_service
+from app.services.model_registry import model_registry
 from app.services.prompt_service import prompt_service
 from app.services.rate_limit_service import rate_limit_service
 from app.services.retry_service import retry_service
@@ -391,20 +390,12 @@ class ChatAppService:
     @staticmethod
     def _fallback_chain(model_id: str) -> list[str]:
         """从请求模型出发沿 fallback_model 链去重，得到依次尝试的候选列表。"""
-        chain: list[str] = []
-        current: str | None = model_id
-        while current is not None and current not in chain:
-            chain.append(current)
-            current = MODEL_CONFIGS[current].fallback_model
-        return chain
+        return model_registry.fallback_chain(model_id)
 
     @staticmethod
     def _validate_model(model_id: str) -> None:
-        """校验模型是否在配置中存在，不存在抛 400。"""
-        if model_id not in MODEL_CONFIGS:
-            raise UnsupportedModelException(
-                f"不支持的模型: {model_id}，可选: {sorted(MODEL_CONFIGS)}"
-            )
+        """校验模型是否在注册表中存在，不存在抛 400。"""
+        model_registry.require(model_id)
 
     @staticmethod
     def _parse_structured(reply: str, response_format: ResponseFormat) -> Any:

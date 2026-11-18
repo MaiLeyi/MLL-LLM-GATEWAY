@@ -34,6 +34,10 @@ class UnsupportedModelException(AppException):
     error_code = ErrorCode.UNSUPPORTED_MODEL
 
 
+class MissingApiKeyException(AppException):
+    error_code = ErrorCode.MISSING_API_KEY
+
+
 class RateLimitedException(AppException):
     error_code = ErrorCode.RATE_LIMITED
 

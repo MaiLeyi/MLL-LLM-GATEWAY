@@ -198,6 +198,35 @@ tr:last-child td { border-bottom: none; }
 .form-err { color: var(--danger); font-size: 12px; margin-top: 8px; }
 .form-ok { color: var(--text2); font-size: 12px; margin-top: 8px; }
 
+/* Models */
+#models { overflow-y: auto; padding: 20px max(20px, calc((100% - 1040px) / 2)) 32px; }
+.models-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.models-head .hint { margin-top: 4px; max-width: 620px; }
+.model-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(310px, 1fr)); gap: 12px; }
+.model-card { border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--sidebar); padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.mc-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.mc-title { font-size: 13px; font-weight: 600; }
+.mc-id { font-family: var(--mono); font-size: 11.5px; color: var(--text2); margin-top: 2px; }
+.mc-tags { display: flex; gap: 5px; flex-wrap: wrap; justify-content: flex-end; }
+.mc-rows { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.mc-row { display: flex; gap: 8px; min-width: 0; }
+.mc-row .k { width: 72px; flex-shrink: 0; color: var(--text2); }
+.mc-row .v { font-family: var(--mono); font-size: 11.5px; word-break: break-all; min-width: 0; }
+.mc-status { border-top: 1px dashed var(--border); padding-top: 8px; font-family: var(--mono); font-size: 11.5px; color: var(--text2); word-break: break-all; }
+.mc-status.ok { color: var(--ok); }
+.mc-status.err { color: var(--danger); }
+.mc-foot { display: flex; gap: 6px; flex-wrap: wrap; margin-top: auto; padding-top: 6px; }
+.mc-foot .chip-btn { padding: 4px 9px; font-size: 12px; }
+.model-form { max-width: 780px; margin-top: 16px; }
+.mf-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 12px; }
+.mf-grid label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: var(--text2); }
+.mf-grid input, .mf-grid select { width: 100%; }
+.mf-grid .span2 { grid-column: 1 / -1; }
+@media (max-width: 760px) {
+  .mf-grid { grid-template-columns: 1fr; }
+  .mf-grid .span2 { grid-column: auto; }
+}
+
 @media (max-width: 760px) {
   .sidebar { width: 60px; padding: 12px 6px; }
   .brand span:not(.mark), nav button span, .side-foot span:not(.dot) { display: none; }
@@ -217,6 +246,10 @@ tr:last-child td { border-bottom: none; }
       <button data-tab="playground" class="active">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
         <span>Playground</span>
+      </button>
+      <button data-tab="models">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+        <span>Models</span>
       </button>
       <button data-tab="metrics">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>
@@ -287,6 +320,55 @@ tr:last-child td { border-bottom: none; }
         </div>
       </section>
 
+      <!-- Models -->
+      <section id="models" hidden>
+        <div class="models-head">
+          <div>
+            <div class="sect" style="margin-bottom:2px">已配置模型</div>
+            <div class="hint">API Key 存储在 macOS 系统钥匙串；配置文件只保存地址、模型名等非敏感信息。</div>
+          </div>
+          <button class="btn-primary" id="addModelBtn">新增模型</button>
+        </div>
+
+        <div class="model-grid" id="modelGrid"></div>
+
+        <div class="card model-form" id="modelForm" hidden>
+          <h3 id="modelFormTitle">新增模型</h3>
+          <div class="mf-grid">
+            <label>模型 ID<input id="mfId" placeholder="如 qwen" spellcheck="false"></label>
+            <label>显示名称<input id="mfDisplay" placeholder="如 Qwen Plus" spellcheck="false"></label>
+            <label>上游模型名<input id="mfProvider" placeholder="如 qwen-plus" spellcheck="false"></label>
+            <label>Base URL<input id="mfBaseUrl" placeholder="https://api.example.com/v1" spellcheck="false"></label>
+            <label>协议
+              <select id="mfProtocol">
+                <option value="openai">openai</option>
+                <option value="anthropic">anthropic</option>
+              </select>
+            </label>
+            <label>结构化输出
+              <select id="mfStructured">
+                <option value="">不支持</option>
+                <option value="json_object">json_object</option>
+                <option value="json_schema">json_schema</option>
+              </select>
+            </label>
+            <label>限流（次/分钟，0 不限）<input id="mfRate" type="number" min="0" value="60"></label>
+            <label>备用模型<select id="mfFallback"><option value="">无</option></select></label>
+            <label>输入价格（$/百万 Token）<input id="mfInPrice" type="number" min="0" step="0.01" value="0"></label>
+            <label>输出价格（$/百万 Token）<input id="mfOutPrice" type="number" min="0" step="0.01" value="0"></label>
+            <label class="span2">API Key
+              <input id="mfApiKey" type="password" autocomplete="off" spellcheck="false" placeholder="写入系统钥匙串；编辑时留空表示不修改">
+            </label>
+          </div>
+          <div class="row" style="margin-top:12px">
+            <button class="btn-primary" id="mfSave">保存</button>
+            <button class="chip-btn" id="mfCancel">取消</button>
+          </div>
+          <div class="form-err" id="mfErr" hidden></div>
+          <div class="form-ok" id="mfOk" hidden></div>
+        </div>
+      </section>
+
       <!-- Metrics -->
       <section id="metrics" hidden>
         <div class="kpis" id="kpis"></div>
@@ -349,12 +431,13 @@ async function api(path, options) {
 
 /* ---------- Tab 导航 ---------- */
 let metricsTimer = null;
-const TAB_TITLES = { playground: 'Playground', metrics: 'Metrics', prompts: 'Prompts' };
+const TAB_TITLES = { playground: 'Playground', models: 'Models', metrics: 'Metrics', prompts: 'Prompts' };
 function switchTab(name) {
   document.querySelectorAll('nav button').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
-  ['playground', 'metrics', 'prompts'].forEach((t) => { $(t).hidden = t !== name; });
+  ['playground', 'models', 'metrics', 'prompts'].forEach((t) => { $(t).hidden = t !== name; });
   $('tabTitle').textContent = TAB_TITLES[name] || name;
   if (metricsTimer) { clearInterval(metricsTimer); metricsTimer = null; }
+  if (name === 'models') loadModelCards();
   if (name === 'metrics') { loadMetrics(); metricsTimer = setInterval(loadMetrics, 5000); }
   if (name === 'prompts') loadPrompts();
 }
@@ -575,6 +658,212 @@ $('input').addEventListener('input', (e) => {
   e.target.style.height = 'auto';
   e.target.style.height = Math.min(e.target.scrollHeight, 140) + 'px';
 });
+
+/* ---------- Models ---------- */
+let modelCards = [];
+const modelTests = new Map();  // 模型 id -> {state: ''|'ok'|'err', text}
+let editingModelId = null;
+
+async function loadModelCards() {
+  try {
+    const data = await (await api('/models')).json();
+    modelCards = data.items || [];
+    renderModelCards();
+  } catch (e) {
+    $('modelGrid').innerHTML = `<div class="hint">${esc(e.code)}: ${esc(e.message)}</div>`;
+  }
+}
+
+function apiKeyHtml(card) {
+  if (!card.has_api_key) return '<span class="badge err">未配置</span>';
+  const source = card.api_key_source === 'env' ? '.env 环境变量' : '系统钥匙串';
+  return `<span class="badge ok">已配置</span> <span class="hint">${esc(card.api_key_masked || '')} · ${source}</span>`;
+}
+
+function renderModelCards() {
+  const grid = $('modelGrid');
+  if (!modelCards.length) {
+    grid.innerHTML = '<div class="hint">暂无模型，点击右上角新增。</div>';
+    return;
+  }
+  grid.innerHTML = modelCards.map((card) => {
+    const test = modelTests.get(card.id);
+    const status = test
+      ? `<div class="mc-status ${test.state}">${esc(test.text)}</div>`
+      : '<div class="mc-status">尚未测试</div>';
+    const limit = card.rate_limit_per_minute > 0 ? `${card.rate_limit_per_minute} 次/分钟` : '不限';
+    return `
+      <div class="model-card" data-id="${esc(card.id)}">
+        <div class="mc-head">
+          <div>
+            <div class="mc-title">${esc(card.display_name || card.id)}</div>
+            <div class="mc-id">${esc(card.id)}</div>
+          </div>
+          <div class="mc-tags">
+            ${card.is_default ? '<span class="badge">默认</span>' : ''}
+            <span class="badge">${esc(card.protocol)}</span>
+          </div>
+        </div>
+        <div class="mc-rows">
+          <div class="mc-row"><span class="k">上游模型</span><span class="v">${esc(card.provider_model)}</span></div>
+          <div class="mc-row"><span class="k">Base URL</span><span class="v">${esc(card.base_url)}</span></div>
+          <div class="mc-row"><span class="k">结构化</span><span class="v">${esc(card.structured_output_mode || '不支持')}</span></div>
+          <div class="mc-row"><span class="k">限流</span><span class="v">${esc(limit)}</span></div>
+          <div class="mc-row"><span class="k">备用模型</span><span class="v">${esc(card.fallback_model || '无')}</span></div>
+          <div class="mc-row"><span class="k">价格</span><span class="v">$${card.input_price_per_million}/M in · $${card.output_price_per_million}/M out</span></div>
+          <div class="mc-row"><span class="k">API Key</span><span class="v">${apiKeyHtml(card)}</span></div>
+        </div>
+        ${status}
+        <div class="mc-foot">
+          <button class="chip-btn" data-act="test">测试可用性</button>
+          <button class="chip-btn" data-act="edit">编辑</button>
+          ${card.is_default ? '' : '<button class="chip-btn" data-act="default">设为默认</button><button class="chip-btn" data-act="delete">删除</button>'}
+        </div>
+      </div>`;
+  }).join('');
+
+  grid.querySelectorAll('.model-card').forEach((el) => {
+    const id = el.dataset.id;
+    el.querySelectorAll('button[data-act]').forEach((btn) => {
+      btn.addEventListener('click', () => handleModelAction(btn.dataset.act, id));
+    });
+  });
+}
+
+async function handleModelAction(action, id) {
+  if (action === 'test') {
+    await testModel(id);
+  } else if (action === 'edit') {
+    const card = modelCards.find((c) => c.id === id);
+    if (card) openModelForm(card);
+  } else if (action === 'default') {
+    try {
+      await api(`/models/${encodeURIComponent(id)}/default`, { method: 'POST' });
+      await loadModelCards();
+      await loadModels();
+    } catch (e) {
+      alert(`${e.code}: ${e.message}`);
+    }
+  } else if (action === 'delete') {
+    if (!confirm(`确认删除模型 ${id}？`)) return;
+    try {
+      await api(`/models/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      modelTests.delete(id);
+      await loadModelCards();
+      await loadModels();
+    } catch (e) {
+      alert(`${e.code}: ${e.message}`);
+    }
+  }
+}
+
+async function testModel(id) {
+  modelTests.set(id, { state: '', text: '测试中…' });
+  renderModelCards();
+  try {
+    const result = await (await api(`/models/${encodeURIComponent(id)}/test`, { method: 'POST' })).json();
+    if (result.ok) {
+      const reply = result.reply ? ` · ${result.reply}` : '';
+      modelTests.set(id, { state: 'ok', text: `可用 · ${result.latency_ms}ms${reply}` });
+    } else {
+      modelTests.set(id, {
+        state: 'err',
+        text: `失败 · ${result.error_code || 'ERROR'}：${result.error_message || '未知错误'}`,
+      });
+    }
+  } catch (e) {
+    modelTests.set(id, { state: 'err', text: `请求失败 · ${e.code}: ${e.message}` });
+  }
+  renderModelCards();
+}
+
+function fillFallbackOptions(selected) {
+  const options = modelCards
+    .filter((c) => c.id !== editingModelId)
+    .map((c) => `<option value="${esc(c.id)}">${esc(c.display_name || c.id)} (${esc(c.id)})</option>`);
+  $('mfFallback').innerHTML = '<option value="">无</option>' + options.join('');
+  $('mfFallback').value = selected || '';
+}
+
+function openModelForm(card) {
+  editingModelId = card ? card.id : null;
+  $('modelFormTitle').textContent = card ? `编辑模型 · ${card.id}` : '新增模型';
+  $('mfId').value = card ? card.id : '';
+  $('mfId').disabled = !!card;
+  $('mfDisplay').value = card ? card.display_name || '' : '';
+  $('mfProvider').value = card ? card.provider_model : '';
+  $('mfBaseUrl').value = card ? card.base_url : '';
+  $('mfProtocol').value = card ? card.protocol : 'openai';
+  $('mfStructured').value = card && card.structured_output_mode ? card.structured_output_mode : '';
+  $('mfRate').value = card ? card.rate_limit_per_minute : 60;
+  $('mfInPrice').value = card ? card.input_price_per_million : 0;
+  $('mfOutPrice').value = card ? card.output_price_per_million : 0;
+  $('mfApiKey').value = '';
+  fillFallbackOptions(card ? card.fallback_model : '');
+  $('mfErr').hidden = true;
+  $('mfOk').hidden = true;
+  $('modelForm').hidden = false;
+  $('mfDisplay').focus();
+}
+
+function closeModelForm() {
+  $('modelForm').hidden = true;
+  editingModelId = null;
+}
+
+async function saveModel() {
+  $('mfErr').hidden = true;
+  $('mfOk').hidden = true;
+  const body = {
+    display_name: $('mfDisplay').value.trim(),
+    provider_model: $('mfProvider').value.trim(),
+    base_url: $('mfBaseUrl').value.trim(),
+    protocol: $('mfProtocol').value,
+    structured_output_mode: $('mfStructured').value || null,
+    rate_limit_per_minute: Number($('mfRate').value || 0),
+    fallback_model: $('mfFallback').value || null,
+    input_price_per_million: Number($('mfInPrice').value || 0),
+    output_price_per_million: Number($('mfOutPrice').value || 0),
+  };
+  if (!body.provider_model || !body.base_url) {
+    $('mfErr').textContent = '上游模型名与 Base URL 不能为空';
+    $('mfErr').hidden = false;
+    return;
+  }
+  const apiKey = $('mfApiKey').value.trim();
+  if (apiKey) body.api_key = apiKey;
+
+  try {
+    if (editingModelId) {
+      await api(`/models/${encodeURIComponent(editingModelId)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      modelTests.delete(editingModelId);
+      $('mfOk').textContent = `已保存 ${editingModelId}`;
+    } else {
+      body.id = $('mfId').value.trim();
+      await api('/models', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      $('mfOk').textContent = `已新增 ${body.id}`;
+    }
+    $('mfOk').hidden = false;
+    await loadModelCards();
+    await loadModels();
+    setTimeout(closeModelForm, 600);
+  } catch (e) {
+    $('mfErr').textContent = `${e.code}: ${e.message}`;
+    $('mfErr').hidden = false;
+  }
+}
+
+$('addModelBtn').addEventListener('click', () => openModelForm(null));
+$('mfCancel').addEventListener('click', closeModelForm);
+$('mfSave').addEventListener('click', saveModel);
 
 /* ---------- Metrics ---------- */
 const fmtMs = (ms) => (ms === null || ms === undefined ? '—' : (ms / 1000).toFixed(2) + 's');
