@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
 from app.api.v1.chat_router import router as chat_router
+from app.api.v1.conversation_router import router as conversation_router
 from app.api.v1.metrics_router import router as metrics_router
 from app.api.v1.models_router import router as models_router
 from app.api.v1.prompt_router import router as prompt_router
@@ -26,6 +27,7 @@ app.add_middleware(
 
 register_exception_handlers(app)
 app.include_router(chat_router)
+app.include_router(conversation_router)
 app.include_router(metrics_router)
 app.include_router(prompt_router)
 app.include_router(models_router)

@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app.config.model_config import ModelConfig
+from app.config.paths import data_dir
 from app.config.settings import DEFAULT_MODEL, MODEL_CONFIGS as SEED_MODEL_CONFIGS
 from app.core.exceptions import (
     InternalException,
@@ -16,6 +17,7 @@ from app.core.exceptions import (
     MissingApiKeyException,
     UnsupportedModelException,
 )
+from app.services.audit_service import audit_service
 
 logger = logging.getLogger(__name__)
 
@@ -42,18 +44,6 @@ class ModelDraft:
     output_price_per_million: float = 0.0
     display_name: str = ""
     api_key: str | None = None
-
-
-def _data_dir() -> Path:
-    """模型配置文件目录：可通过 MLL_DATA_DIR 覆盖，默认使用各系统用户数据目录。"""
-    override = os.getenv("MLL_DATA_DIR")
-    if override:
-        return Path(override).expanduser()
-    if sys.platform == "darwin":
-        return Path.home() / "Library" / "Application Support" / "MLL Gateway"
-    if sys.platform == "win32":
-        return Path(os.getenv("APPDATA") or Path.home()) / "MLL Gateway"
-    return Path(os.getenv("XDG_CONFIG_HOME") or Path.home() / ".config") / "mll-gateway"
 
 
 def _default_env_name(model_id: str) -> str:
@@ -190,7 +180,7 @@ class ModelRegistry:
     """运行时模型注册表：JSON 持久化非敏感配置，Key 走系统钥匙串并保留 .env 兜底。"""
 
     def __init__(self, config_path: Path | None = None) -> None:
-        self._path = config_path or (_data_dir() / CONFIG_FILE_NAME)
+        self._path = config_path or (data_dir() / CONFIG_FILE_NAME)
         self._lock = threading.RLock()
         self._models: dict[str, ModelConfig] = {}
         self._default_model = DEFAULT_MODEL
@@ -296,6 +286,16 @@ class ModelRegistry:
             self._models[model_id] = config
             self._bump_locked()
             self._persist_locked()
+            audit_service.record(
+                "model.create",
+                "model",
+                resource_id=model_id,
+                detail={
+                    "protocol": config.protocol,
+                    "base_url": config.base_url,
+                    "api_key_set": bool(api_key),
+                },
+            )
         return self.describe(model_id)
 
     def update(self, model_id: str, draft: ModelDraft) -> dict:
@@ -313,6 +313,16 @@ class ModelRegistry:
             self._models[model_id] = config
             self._bump_locked()
             self._persist_locked()
+            audit_service.record(
+                "model.update",
+                "model",
+                resource_id=model_id,
+                detail={
+                    "protocol": config.protocol,
+                    "base_url": config.base_url,
+                    "api_key_changed": bool(api_key),
+                },
+            )
         return self.describe(model_id)
 
     def delete(self, model_id: str) -> None:
@@ -338,6 +348,9 @@ class ModelRegistry:
             _keychain_delete(model_id)
             self._bump_locked()
             self._persist_locked()
+            audit_service.record(
+                "model.delete", "model", resource_id=model_id
+            )
 
     def set_default(self, model_id: str) -> dict:
         with self._lock:
@@ -346,6 +359,12 @@ class ModelRegistry:
             self._default_model = model_id
             self._bump_locked()
             self._persist_locked()
+            audit_service.record(
+                "model.set_default",
+                "model",
+                resource_id=model_id,
+                detail={"default_model": model_id},
+            )
         return self.describe(model_id)
 
     def _config_from_draft(self, model_id: str, draft: ModelDraft) -> ModelConfig:

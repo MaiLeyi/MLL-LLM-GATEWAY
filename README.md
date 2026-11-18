@@ -17,6 +17,9 @@
 - **模型配置管理**：控制台 Models 页面以卡片展示已配置模型，支持新增、编辑、删除、设为默认，并可发起真实的上游可用性测试；配置保存到用户数据目录 `models.json`，热更新生效。
 - **API Key 存储**：界面填写的 Key 写入 macOS 系统钥匙串，`models.json` 只保存非敏感字段；未写入钥匙串时回退读取 `.env`，所有接口仅返回掩码。
 - **多轮消息**：`message`（单条简写）与 `messages`（多轮，含 system / user / assistant 角色）二选一，角色原样透传上游。
+- **历史对话与持久化**：会话、消息、Run、提示词版本、调用明细与审计统一写入用户数据目录下的 SQLite `gateway.db`；`/chat` 与 `/stream` 传入 `conversation_id` 即写入历史，控制台 History 页可查看、重命名、删除与继续对话。
+- **工作台就绪的数据模型**：schema 已按 `users / workspaces / conversations / runs / messages / tool_calls / artifacts / run_events / prompts / llm_calls / audit_events` 设计；当前所有数据归属默认工作区，登录体系与 PostgreSQL 迁移在后续阶段接入。
+- **Repository 分层**：Service 只依赖 `app/repositories/base.py` 里的协议，SQL 集中在 `app/repositories/sqlite.py`；通过 `MLL_DB_BACKEND` 选择实现，后续新增 PostgreSQL 实现即可切换，业务层与 API 不需要改。
 - **流式输出**：`POST /stream`，标准 SSE 事件序列 `response.created` → `content.delta`* → `response.completed`（含真实 usage 与延迟），异常时下发 `response.failed`；自动剥离 `<think>...</think>` 推理块。
 - **结构化输出**：`response_format` 支持 `text` / `json_object` / `json_schema`；上游不支持原生 `json_schema` 时自动降级为 `json_object` 并注入 schema 说明，网关侧用 `jsonschema` 二次校验。
 - **提示词版本管理**：模板按 `name@version` 存储，`latest` 解析为最新版本，支持 `${变量}` 替换；版本不可覆盖。
@@ -61,8 +64,13 @@ EOF
 | DELETE | `/models/{id}` | 删除模型（默认模型或被引用为备用时拒绝） |
 | POST | `/models/{id}/default` | 设为默认模型 |
 | POST | `/models/{id}/test` | 真实调用上游做一次最小可用性测试 |
-| POST | `/chat` | 一次性返回完整回答，支持多轮 `messages`、`response_format`、`prompt` 版本引用与 `timeout_seconds` |
-| POST | `/stream` | SSE 流式回答，支持 `prompt` 版本引用与 `timeout_seconds`（不支持 `response_format`） |
+| POST | `/chat` | 一次性返回完整回答，支持多轮 `messages`、`response_format`、`prompt` 版本引用、`timeout_seconds` 与 `conversation_id` |
+| POST | `/stream` | SSE 流式回答，支持 `prompt` 版本引用、`timeout_seconds` 与 `conversation_id`（不支持 `response_format`） |
+| GET | `/conversations?limit=&offset=` | 历史对话分页列表（按最近更新时间倒序） |
+| POST | `/conversations` | 创建历史对话，可带标题、模型与模板引用 |
+| GET | `/conversations/{id}` | 会话详情与完整消息 |
+| PATCH | `/conversations/{id}` | 重命名历史对话 |
+| DELETE | `/conversations/{id}` | 删除历史对话及其消息 |
 | POST | `/prompts` | 发布一个模板版本 |
 | GET | `/prompts?name=` | 列出模板版本 |
 | GET | `/prompts/{name}/{version}` | 查询模板详情，`version` 可传 `latest` |
@@ -260,6 +268,47 @@ curl -s http://127.0.0.1:8000/metrics | python3 -m json.tool
 - 每次调用按 `input/output_price_per_million` 折算 `cost_usd`，写入 `/metrics` 明细与聚合（含 `fallbacks` 切换次数）。
 - 主备链在启动时校验：指向未配置模型会直接报错。
 
+### 9. 历史对话与持久化
+
+创建会话并写入一次问答：
+
+```bash
+cid=$(curl -s -X POST http://127.0.0.1:8000/conversations \
+  -H 'Content-Type: application/json' \
+  -d '{"title":"演示会话","model":"deepseek"}' \
+  | python3 -c 'import sys,json;print(json.load(sys.stdin)["id"])')
+
+curl -s http://127.0.0.1:8000/chat \
+  -H 'Content-Type: application/json' \
+  -d "{\"message\":\"请只回答两个字：历史\",\"model\":\"deepseek\",\"conversation_id\":\"$cid\"}"
+
+curl -s http://127.0.0.1:8000/conversations/$cid | python3 -m json.tool
+```
+
+`/chat` 的响应会回显 `conversation_id`；`/stream` 的 `response.created` 也会携带它。会话标题在首条用户消息写入时自动补齐；继续对话时把完整 `messages` 与同一个 `conversation_id` 一起提交即可。
+
+持久化设计：
+
+- **存储位置**：默认 `~/Library/Application Support/MLL Gateway/gateway.db`（macOS），可用 `MLL_DB_PATH` 覆盖；`MLL_DB_BACKEND` 选择 Repository 后端（当前支持 `sqlite`）。模型配置仍在同目录 `models.json`，API Key 仍在系统钥匙串。SQLite 使用 WAL 模式，数据库文件权限 `0600`。
+- **事务**：一次成功问答在一个事务里写入 user + assistant 两条消息，并更新会话标题、模型与模板引用；不会出现半截问答。
+- **Run 与事件**：有 `conversation_id` 的调用会创建 `runs` 记录，并追加 `run.started`、`run.completed` / `run.failed` 事件到 `run_events`，为后续工具调用回放与排障预留。
+- **指标恢复**：每次上游调用写入 `llm_calls`，启动时从表里重建聚合指标与最近明细，重启后 `/metrics` 不清零。
+- **提示词**：模板版本写入 `prompts`（按 `workspace_id, name, version` 唯一），重启后仍可解析 `latest` 与历史引用。
+- **审计**：会话创建/重命名/删除、模板发布、模型新增/修改/删除/切换默认都会写入 `audit_events`，不记录任何密钥明文。
+- **工作台模型**：`workspaces / conversations / runs / messages / tool_calls / artifacts / run_events` 已建表；`runs.prompt_snapshot` 用于记录当时的模板引用，`artifacts` 只存文件元数据与 `storage_key`。
+- **多用户演进**：所有业务表已带 `workspace_id`，审计带 `actor_id`；当前使用默认用户 `local-user` 与默认工作区 `default`。上多用户服务端时替换为 PostgreSQL，并接入登录与工作区成员权限即可。
+
+**Repository 分层与切换数据库**
+
+- `app/repositories/base.py` 定义 `ConversationRepository / RunRepository / PromptRepository / MetricsRepository / AuditRepository` 协议与入参 dataclass。
+- `app/repositories/sqlite.py` 是当前唯一实现；Service 通过构造函数注入（默认使用全局 `repositories`），测试可替换为内存假实现。
+- 切换 PostgreSQL：
+  1. 新增 `app/repositories/postgres.py`，实现同一组协议（建议 SQLAlchemy 2.0 + psycopg）。
+  2. 在 `app/repositories/__init__.py` 的 `build_repositories` 注册 `postgres` 分支。
+  3. 设置 `MLL_DB_BACKEND=postgres`，并补充对应连接配置。
+  4. Service、API、前端均不需要改动。
+- 当前协议是同步方法；上异步服务端时，可在 Repository 内部使用同步 Session 并在线程池执行，或把协议升级为 async 后统一替换。
+
 ## 错误码
 
 | code | HTTP | 说明 |
@@ -281,7 +330,7 @@ curl -s http://127.0.0.1:8000/metrics | python3 -m json.tool
 ./.venv/bin/python tests/verify.py
 ```
 
-脚本会真实调用两个上游，覆盖 31 个检查点（重试 / 限流 / 主备切换通过进程内替身与临时配置验证，不额外消耗上游配额）：
+脚本会真实调用两个上游，覆盖 37 个检查点（重试 / 限流 / 主备切换通过进程内替身与临时配置验证，不额外消耗上游配额；历史对话检查使用临时数据库，不污染本地数据）：
 
 1. 统一路由：`deepseek` / `minimax` 均可调用；响应字段（request_id / usage / latency_ms / attempts）完整
 2. 多轮消息：多角色上下文生效；`message` 与 `messages` 互斥（422）
@@ -292,6 +341,7 @@ curl -s http://127.0.0.1:8000/metrics | python3 -m json.tool
 7. 韧性：指数退避重试（含 HTTP 层 + 指标留痕）、429 + Retry-After
 8. 主备切换：主模型故障切备用、同一 request_id 串联两次尝试、成本按价格表折算
 9. 请求超时：自定义超时生效、越界值 422
+10. 历史对话：创建、`/chat` 写入、详情、重命名、列表、删除后 404
 
 全部通过时以退出码 0 结束，失败项会列在末尾。
 
@@ -300,20 +350,25 @@ curl -s http://127.0.0.1:8000/metrics | python3 -m json.tool
 ```
 app/
   adapters/        统一接口 + OpenAI / Anthropic 适配器与协议注册表
-  api/v1/          chat / stream / prompts / metrics / models 路由
+  api/v1/          chat / stream / conversations / prompts / metrics / models 路由
   application/     应用服务：校验、限流、重试、主备切换、结构化校验、指标编排
-  config/          模型（含主备链与价格表）、模板与全局配置
+  config/          模型（含主备链与价格表）、模板、全局配置与用户数据目录
   core/            统一错误码与异常处理器
   schemas/         Pydantic 入参/出参模型
-  services/        重试、限流、指标、模板版本仓库
-static/index.html  零依赖 Web 控制台（GET / 直接返回）
+  services/        SQLite 数据层、会话、Run、审计、重试、限流、指标、模板版本服务
+  repositories/    仓储协议 + SQLite 实现 + 后端工厂（后续加 postgres.py 即可切换）
+static/index.html  零依赖 Web 控制台（Playground / History / Models / Metrics / Prompts）
 tests/verify.py    验收脚本
 main.py            FastAPI 入口
 ```
 
+运行数据默认位于用户数据目录（macOS 为 `~/Library/Application Support/MLL Gateway/`）：`gateway.db` 存会话/消息/Run/模板/调用/审计，`models.json` 存模型非敏感配置。
+
 ## 已知限制
 
-- 模板仓库、限流窗口、指标聚合都在进程内存中：重启丢失，多副本部署时各自独立。生产化需替换为 Redis / 数据库 / Prometheus。
+- SQLite 是当前过渡存储：单写者模型，适合本地单用户与小规模使用；多用户服务端部署需替换为 PostgreSQL。限流窗口仍在进程内存中，多副本部署需接入 Redis。
+- 登录、工作区成员与权限尚未接入：所有请求落在默认用户 `local-user` 与默认工作区 `default`；工具调用、产物写入链路已建表但尚未接入。
+- 模型配置仍是全局的（`models.json` + 系统钥匙串），多用户阶段需下沉到 workspace，并改为服务端加密存储 Key。
 - 当前两个模型都走 OpenAI 兼容协议；Anthropic 适配器已实现但未绑定到任何模型配置。
 - 上游返回 `4xx`（如参数错误）统一映射为 `502 UPSTREAM_ERROR`，调用方需结合 message 判断根因。
 - `/stream` 不支持 `response_format`（由 schema 的 `extra="forbid"` 在入参阶段拒绝），流式与结构化暂不能组合。

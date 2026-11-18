@@ -227,6 +227,31 @@ tr:last-child td { border-bottom: none; }
   .mf-grid .span2 { grid-column: auto; }
 }
 
+/* History */
+#history { display: flex; }
+.h-layout { display: flex; width: 100%; min-height: 0; }
+.h-list-wrap { width: 268px; flex-shrink: 0; display: flex; flex-direction: column; border-right: 1px solid var(--border); background: var(--sidebar); }
+.h-list-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+.h-list { flex: 1; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 2px; }
+.h-item { border: none; background: none; text-align: left; width: 100%; padding: 9px 10px; border-radius: var(--radius); color: var(--text); }
+.h-item:hover { background: var(--surface); }
+.h-item.sel { background: var(--surface-2); }
+.h-item .t { font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.h-item .m { font-size: 11px; color: var(--text2); margin-top: 3px; font-family: var(--mono); }
+.h-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.h-empty { margin: auto; color: var(--text2); font-size: 13px; }
+.h-detail { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.h-detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 14px 24px; border-bottom: 1px solid var(--border); }
+.h-title { font-size: 14px; font-weight: 600; }
+.h-meta { font-family: var(--mono); font-size: 11.5px; color: var(--text2); margin-top: 3px; }
+.h-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.h-messages { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding: 18px 24px 24px; }
+.h-messages .msg { max-width: 78%; }
+.h-messages .hint { margin: auto; }
+@media (max-width: 760px) {
+  .h-list-wrap { width: 180px; }
+}
+
 @media (max-width: 760px) {
   .sidebar { width: 60px; padding: 12px 6px; }
   .brand span:not(.mark), nav button span, .side-foot span:not(.dot) { display: none; }
@@ -246,6 +271,10 @@ tr:last-child td { border-bottom: none; }
       <button data-tab="playground" class="active">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
         <span>Playground</span>
+      </button>
+      <button data-tab="history">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+        <span>History</span>
       </button>
       <button data-tab="models">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
@@ -283,6 +312,7 @@ tr:last-child td { border-bottom: none; }
               </select>
             </label>
             <button class="chip-btn" id="promptBtn">模板引用</button>
+            <button class="chip-btn" id="newChatBtn">新对话</button>
             <label class="switch-row">流式 <input type="checkbox" id="streamToggle"><span class="switch"></span></label>
           </div>
 
@@ -410,6 +440,36 @@ tr:last-child td { border-bottom: none; }
           </div>
         </div>
       </section>
+
+      <!-- History -->
+      <section id="history" hidden>
+        <div class="h-layout">
+          <div class="h-list-wrap">
+            <div class="h-list-head">
+              <span class="sect" style="margin:0">对话历史</span>
+              <button class="chip-btn" id="hNewBtn">新对话</button>
+            </div>
+            <div class="h-list" id="hList"></div>
+          </div>
+          <div class="h-main">
+            <div class="h-empty" id="hEmpty">选择左侧对话查看详情</div>
+            <div class="h-detail" id="hDetail" hidden>
+              <div class="h-detail-head">
+                <div>
+                  <div class="h-title" id="hTitle"></div>
+                  <div class="h-meta" id="hMeta"></div>
+                </div>
+                <div class="h-actions">
+                  <button class="chip-btn" id="hResumeBtn">继续对话</button>
+                  <button class="chip-btn" id="hRenameBtn">重命名</button>
+                  <button class="chip-btn" id="hDeleteBtn">删除</button>
+                </div>
+              </div>
+              <div class="h-messages" id="hMessages"></div>
+            </div>
+          </div>
+        </div>
+      </section>
     </div>
   </div>
 </div>
@@ -431,21 +491,45 @@ async function api(path, options) {
 
 /* ---------- Tab 导航 ---------- */
 let metricsTimer = null;
-const TAB_TITLES = { playground: 'Playground', models: 'Models', metrics: 'Metrics', prompts: 'Prompts' };
+const TAB_TITLES = { playground: 'Playground', history: 'History', models: 'Models', metrics: 'Metrics', prompts: 'Prompts' };
 function switchTab(name) {
   document.querySelectorAll('nav button').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
-  ['playground', 'models', 'metrics', 'prompts'].forEach((t) => { $(t).hidden = t !== name; });
+  ['playground', 'history', 'models', 'metrics', 'prompts'].forEach((t) => { $(t).hidden = t !== name; });
   $('tabTitle').textContent = TAB_TITLES[name] || name;
   if (metricsTimer) { clearInterval(metricsTimer); metricsTimer = null; }
   if (name === 'models') loadModelCards();
   if (name === 'metrics') { loadMetrics(); metricsTimer = setInterval(loadMetrics, 5000); }
   if (name === 'prompts') loadPrompts();
+  if (name === 'history') loadHistory();
 }
 document.querySelectorAll('nav button').forEach((b) => b.addEventListener('click', () => switchTab(b.dataset.tab)));
 
 /* ---------- Playground ---------- */
 const history = [];  // 多轮对话历史，以 messages 提交
+let currentConversationId = null;  // 当前历史对话 id；为空时在下一条消息前创建
 let sending = false;
+
+function startNewChat() {
+  if (sending) return;
+  currentConversationId = null;
+  history.length = 0;
+  $('chat').innerHTML = '<div class="empty">选择模型，输入消息开始对话</div>';
+  $('input').value = '';
+  $('input').style.height = 'auto';
+  $('input').focus();
+}
+
+async function ensureConversation(text, payload) {
+  if (currentConversationId) return;
+  const body = { title: text.replace(/\s+/g, ' ').slice(0, 60), model: $('modelSel').value };
+  if (payload.prompt) body.prompt = payload.prompt;
+  const conv = await (await api('/conversations', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })).json();
+  currentConversationId = conv.id;
+}
 
 async function loadModels() {
   try {
@@ -559,6 +643,18 @@ async function sendMessage() {
 
   sending = true;
   $('sendBtn').disabled = true;
+  const wasNew = !currentConversationId;
+  try {
+    // 首次发送前先创建历史对话，后续消息都会写入同一个会话
+    await ensureConversation(text, payload);
+  } catch (e) {
+    sending = false;
+    $('sendBtn').disabled = false;
+    addBubble('ai err', `${esc(e.code)}: ${esc(e.message)}`);
+    return;
+  }
+  payload.conversation_id = currentConversationId;
+
   $('input').value = '';
   $('input').style.height = 'auto';
   addBubble('user', esc(text));
@@ -570,6 +666,11 @@ async function sendMessage() {
     history.push({ role: 'user', content: text });
   } catch (e) {
     addBubble('ai err', `${esc(e.code)}: ${esc(e.message)}`);
+    // 新会话首条消息失败且未落库时，清理空会话，避免 History 里出现空条目
+    if (wasNew && currentConversationId) {
+      api(`/conversations/${encodeURIComponent(currentConversationId)}`, { method: 'DELETE' }).catch(() => {});
+      currentConversationId = null;
+    }
   } finally {
     sending = false;
     $('sendBtn').disabled = false;
@@ -651,6 +752,7 @@ async function sendStream(payload) {
 }
 
 $('sendBtn').addEventListener('click', sendMessage);
+$('newChatBtn').addEventListener('click', startNewChat);
 $('input').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
 });
@@ -987,6 +1089,166 @@ $('pubBtn').addEventListener('click', async () => {
   } catch (e) {
     $('pubErr').textContent = `${e.code}: ${e.message}`;
     $('pubErr').hidden = false;
+  }
+});
+
+/* ---------- History ---------- */
+let historyItems = [];
+let activeConversation = null;
+let selectedHistoryId = null;
+
+const fmtTime = (iso) => new Date(iso).toLocaleString('zh-CN', {
+  month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false,
+});
+
+async function loadHistory() {
+  try {
+    const data = await (await api('/conversations?limit=100')).json();
+    historyItems = data.items || [];
+    renderHistoryList();
+  } catch (e) {
+    $('hList').innerHTML = `<div class="hint" style="padding:8px">${esc(e.code)}: ${esc(e.message)}</div>`;
+  }
+}
+
+function renderHistoryList() {
+  if (!historyItems.length) {
+    $('hList').innerHTML = '<div class="hint" style="padding:8px">暂无历史对话</div>';
+    return;
+  }
+  $('hList').innerHTML = historyItems.map((c) => `
+    <button class="h-item${c.id === selectedHistoryId ? ' sel' : ''}" data-id="${esc(c.id)}">
+      <div class="t">${esc(c.title)}</div>
+      <div class="m">${c.message_count} 条 · ${esc(fmtTime(c.updated_at))}</div>
+    </button>`).join('');
+  $('hList').querySelectorAll('.h-item').forEach((b) =>
+    b.addEventListener('click', () => openConversation(b.dataset.id)));
+}
+
+async function openConversation(id) {
+  try {
+    const conv = await (await api(`/conversations/${encodeURIComponent(id)}`)).json();
+    activeConversation = conv;
+    selectedHistoryId = id;
+    renderHistoryList();
+    $('hEmpty').hidden = true;
+    $('hDetail').hidden = false;
+    $('hTitle').textContent = conv.title;
+    const parts = [`${conv.message_count} 条消息`, `更新于 ${fmtTime(conv.updated_at)}`];
+    if (conv.model) parts.push(conv.model);
+    if (conv.prompt_name) parts.push(`${conv.prompt_name}@${conv.prompt_version || 'latest'}`);
+    $('hMeta').textContent = parts.join(' · ');
+    $('hMessages').innerHTML = '';
+    if (!conv.messages.length) {
+      $('hMessages').innerHTML = '<div class="hint">该对话还没有消息</div>';
+      return;
+    }
+    conv.messages.forEach((m) => {
+      const role = m.role === 'user' ? 'user' : 'ai';
+      let html = esc(m.content);
+      if (m.role !== 'user') {
+        html += metaLine([
+          m.model ? esc(m.model) : null,
+          m.latency_ms != null ? (m.latency_ms / 1000).toFixed(2) + 's' : null,
+          usageText(m.usage),
+          m.request_id ? `<code>${esc(m.request_id.slice(0, 8))}</code>` : null,
+        ]);
+      }
+      const div = document.createElement('div');
+      div.className = 'msg ' + role;
+      div.innerHTML = html;
+      $('hMessages').appendChild(div);
+    });
+    $('hMessages').scrollTop = $('hMessages').scrollHeight;
+  } catch (e) {
+    alert(`${e.code}: ${e.message}`);
+  }
+}
+
+function resumeConversation(conv) {
+  if (!conv) return;
+  switchTab('playground');
+  currentConversationId = conv.id;
+  history.length = 0;
+  $('chat').innerHTML = '';
+  // 恢复多轮上下文，忽略未来可能出现的工具消息
+  conv.messages.forEach((m) => {
+    if (!['system', 'user', 'assistant'].includes(m.role)) return;
+    history.push({ role: m.role, content: m.content });
+    if (m.role === 'system') return;
+    let html = esc(m.content);
+    if (m.role === 'assistant') {
+      html += metaLine([
+        m.model ? esc(m.model) : null,
+        m.latency_ms != null ? (m.latency_ms / 1000).toFixed(2) + 's' : null,
+        usageText(m.usage),
+      ]);
+    }
+    addBubble(m.role === 'user' ? 'user' : 'ai', html);
+  });
+  if (!conv.messages.some((m) => m.role !== 'system')) {
+    $('chat').innerHTML = '<div class="empty">继续这个对话</div>';
+  }
+  if (conv.model && [...$('modelSel').options].some((o) => o.value === conv.model)) {
+    $('modelSel').value = conv.model;
+  }
+  if (conv.prompt_name) {
+    $('promptPanel').hidden = false;
+    $('promptBtn').classList.add('on');
+    $('promptName').value = conv.prompt_name;
+    $('promptVersion').value = conv.prompt_version || 'latest';
+    loadPromptVars().then(() => {
+      document.querySelectorAll('#promptVars input').forEach((i) => {
+        i.value = (conv.prompt_variables || {})[i.dataset.var] || '';
+      });
+    });
+  } else {
+    $('promptPanel').hidden = true;
+    $('promptBtn').classList.remove('on');
+  }
+  $('input').focus();
+}
+
+$('hNewBtn').addEventListener('click', () => {
+  startNewChat();
+  switchTab('playground');
+});
+
+$('hResumeBtn').addEventListener('click', () => {
+  if (activeConversation) resumeConversation(activeConversation);
+});
+
+$('hRenameBtn').addEventListener('click', async () => {
+  if (!activeConversation) return;
+  const title = window.prompt('重命名对话', activeConversation.title);
+  if (title === null || !title.trim()) return;
+  try {
+    await api(`/conversations/${encodeURIComponent(activeConversation.id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: title.trim() }),
+    });
+    await loadHistory();
+    await openConversation(activeConversation.id);
+  } catch (e) {
+    alert(`${e.code}: ${e.message}`);
+  }
+});
+
+$('hDeleteBtn').addEventListener('click', async () => {
+  if (!activeConversation) return;
+  if (!confirm(`确认删除对话「${activeConversation.title}」？`)) return;
+  const id = activeConversation.id;
+  try {
+    await api(`/conversations/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    if (currentConversationId === id) startNewChat();
+    activeConversation = null;
+    selectedHistoryId = null;
+    $('hDetail').hidden = true;
+    $('hEmpty').hidden = false;
+    await loadHistory();
+  } catch (e) {
+    alert(`${e.code}: ${e.message}`);
   }
 });
 

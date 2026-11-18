@@ -8,11 +8,19 @@
 """
 
 import json
+import os
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+
+# 每次验证使用独立临时数据库，避免污染用户历史数据，也保证指标从零开始
+_VERIFY_DB = Path(tempfile.gettempdir()) / f"mll-gateway-verify-{os.getpid()}.db"
+for _suffix in ("", "-wal", "-shm"):
+    Path(str(_VERIFY_DB) + _suffix).unlink(missing_ok=True)
+os.environ["MLL_DB_PATH"] = str(_VERIFY_DB)
 
 from dotenv import load_dotenv  # noqa: E402
 
@@ -514,6 +522,70 @@ def check_timeout() -> None:
         )
 
 
+def check_conversation_history() -> None:
+    """10. 历史对话：创建、写入、读取、重命名、删除。"""
+    created = client.post(
+        "/conversations", json={"title": "验证历史对话", "model": "deepseek"}
+    )
+    created_body = created.json()
+    conversation_id = created_body.get("id")
+    check(
+        "历史对话 / 创建会话",
+        created.status_code == 201 and bool(conversation_id),
+        f"status={created.status_code} id={conversation_id}",
+    )
+
+    chat = client.post(
+        "/chat",
+        json={
+            "message": "请只回答两个字：历史",
+            "model": "deepseek",
+            "conversation_id": conversation_id,
+        },
+    )
+    chat_body = chat.json()
+    check(
+        "历史对话 / chat 写入会话",
+        chat.status_code == 200
+        and chat_body.get("conversation_id") == conversation_id,
+        f"status={chat.status_code} conversation_id={chat_body.get('conversation_id')}",
+    )
+
+    detail = client.get(f"/conversations/{conversation_id}")
+    detail_body = detail.json()
+    roles = [message["role"] for message in detail_body.get("messages", [])]
+    check(
+        "历史对话 / 详情包含问答两条消息",
+        detail.status_code == 200 and roles == ["user", "assistant"],
+        f"status={detail.status_code} roles={roles}",
+    )
+
+    renamed = client.patch(
+        f"/conversations/{conversation_id}", json={"title": "重命名后的会话"}
+    )
+    check(
+        "历史对话 / 重命名",
+        renamed.status_code == 200
+        and renamed.json().get("title") == "重命名后的会话",
+        f"status={renamed.status_code} title={renamed.json().get('title')}",
+    )
+
+    listed = client.get("/conversations?limit=10").json()
+    check(
+        "历史对话 / 列表包含会话",
+        any(item["id"] == conversation_id for item in listed.get("items", [])),
+        f"total={listed.get('total')}",
+    )
+
+    deleted = client.delete(f"/conversations/{conversation_id}")
+    missing = client.get(f"/conversations/{conversation_id}")
+    check(
+        "历史对话 / 删除后不可访问",
+        deleted.status_code == 200 and missing.status_code == 404,
+        f"delete={deleted.status_code} get={missing.status_code}",
+    )
+
+
 def main_entry() -> int:
     check_routing()
     check_multiturn()
@@ -525,6 +597,7 @@ def main_entry() -> int:
     check_rate_limit()
     check_fallback_and_cost()
     check_timeout()
+    check_conversation_history()
 
     failed = [name for name, ok, _ in results if not ok]
     print("\n" + "=" * 60)

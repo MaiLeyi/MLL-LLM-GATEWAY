@@ -90,6 +90,13 @@ class ChatInput(BaseModel):
     timeout_seconds: float = Field(
         default=30, gt=0, le=120, description="上游调用超时（秒），逐请求生效"
     )  # 请求级超时
+    conversation_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=64,
+        pattern=r"^[A-Za-z0-9_-]+$",
+        description="历史对话 id；传入后本次问答会写入该会话",
+    )  # 历史对话 id，未传时不写入历史
 
     @model_validator(mode="after")
     def _check_message_input(self) -> "ChatInput":
@@ -140,3 +147,6 @@ class ChatResponse(BaseModel):
     attempts: int = Field(
         ..., ge=1, description="上游调用总次数（重试与主备切换都会计入）"
     )  # 上游调用总次数
+    conversation_id: str | None = Field(
+        default=None, description="本次问答写入的历史对话 id；未传时为 null"
+    )  # 历史对话 id

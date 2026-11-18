@@ -16,6 +16,7 @@ from app.core.exceptions import (
     UpstreamException,
     UpstreamTimeoutException,
 )
+from app.config.tenancy import DEFAULT_WORKSPACE_ID
 from app.schemas.chat import ResponseFormat
 from app.schemas.prompt import PromptSelection
 from app.services.metrics_service import CallMetrics, metrics_service
@@ -71,6 +72,10 @@ class ChatAppService:
         response_format: ResponseFormat | None = None,
         prompt: PromptSelection | None = None,
         timeout_seconds: float | None = None,
+        conversation_id: str | None = None,
+        workspace_id: str = DEFAULT_WORKSPACE_ID,
+        run_id: str | None = None,
+        request_id: str | None = None,
     ) -> CompletionResult:
         """一次性返回完整回答，并按 response_format 校验输出。"""
         response_format = response_format or ResponseFormat()
@@ -83,12 +88,14 @@ class ChatAppService:
         prompt_name = None
         prompt_version = None
         if prompt is not None:
-            system_prompt, template = prompt_service.render_resolved(prompt)
+            system_prompt, template = prompt_service.render_resolved(
+                prompt, workspace_id=workspace_id
+            )
             prompt_name, prompt_version = template.name, template.version
 
         # 2. 准备调用：上游格式约束与请求级计时/计数
         upstream_format = response_format.to_upstream()
-        request_id = str(uuid4())
+        request_id = request_id or str(uuid4())
         request_started = time.perf_counter()
         attempts = 0
 
@@ -131,6 +138,9 @@ class ChatAppService:
                     success=False,
                     retries=retries,
                     error_code=error.code.code,
+                    conversation_id=conversation_id,
+                    workspace_id=workspace_id,
+                    run_id=run_id,
                 )
                 # 仅上游可用性问题才切换备用模型；输出契约错误等直接抛出
                 if isinstance(error, (UpstreamException, UpstreamTimeoutException)):
@@ -159,6 +169,9 @@ class ChatAppService:
                     usage=completion.usage,
                     retries=retries,
                     error_code=exc.code.code,
+                    conversation_id=conversation_id,
+                    workspace_id=workspace_id,
+                    run_id=run_id,
                 )
                 raise
 
@@ -173,6 +186,9 @@ class ChatAppService:
                 success=True,
                 usage=completion.usage,
                 retries=retries,
+                conversation_id=conversation_id,
+                workspace_id=workspace_id,
+                run_id=run_id,
             )
             return CompletionResult(
                 reply=completion.text,
@@ -194,6 +210,10 @@ class ChatAppService:
         model_id: str,
         prompt: PromptSelection | None = None,
         timeout_seconds: float | None = None,
+        conversation_id: str | None = None,
+        workspace_id: str = DEFAULT_WORKSPACE_ID,
+        run_id: str | None = None,
+        request_id: str | None = None,
     ) -> tuple[str, AsyncIterator[StreamEvent]]:
         """返回 (request_id, 标准 SSE 事件流)；校验与首选模型限流在返回前完成，超限才能正常响应 429。"""
         # 1. 前置校验（必须发生在返回流之前）
@@ -204,13 +224,15 @@ class ChatAppService:
         prompt_name = None
         prompt_version = None
         if prompt is not None:
-            system_prompt, template = prompt_service.render_resolved(prompt)
+            system_prompt, template = prompt_service.render_resolved(
+                prompt, workspace_id=workspace_id
+            )
             prompt_name, prompt_version = template.name, template.version
         # 1.3 校验首选模型是否还有配额
         await rate_limit_service.check(model_id)
 
         # 2. 生成请求 ID，返回带主备切换与重试能力的事件流，异常在流出阶段统一映射
-        request_id = str(uuid4())
+        request_id = request_id or str(uuid4())
         return request_id, self._stream_with_fallback(
             request_id,
             model_id,
@@ -219,6 +241,9 @@ class ChatAppService:
             prompt_name,
             prompt_version,
             timeout_seconds,
+            conversation_id,
+            workspace_id,
+            run_id,
         )
 
     async def _stream_with_fallback(
@@ -230,6 +255,9 @@ class ChatAppService:
         prompt_name: str | None,
         prompt_version: str | None,
         timeout_seconds: float | None,
+        conversation_id: str | None,
+        workspace_id: str,
+        run_id: str | None,
     ) -> AsyncIterator[StreamEvent]:
         """沿主备链依次建流；已产出内容后不再切换，避免客户端看到重复文本。"""
         started = time.perf_counter()
@@ -252,6 +280,9 @@ class ChatAppService:
                     prompt_name,
                     prompt_version,
                     timeout_seconds,
+                    conversation_id,
+                    workspace_id,
+                    run_id,
                 ):
                     # 结束分片携带 usage，留给 completed 事件汇总
                     if chunk.usage is not None:
@@ -289,6 +320,9 @@ class ChatAppService:
         prompt_name: str | None,
         prompt_version: str | None,
         timeout_seconds: float | None,
+        conversation_id: str | None,
+        workspace_id: str,
+        run_id: str | None,
     ) -> AsyncIterator[StreamChunk]:
         # 1. 记录起始时间、首 Token 延迟与上游返回的 usage
         started = time.perf_counter()
@@ -336,6 +370,9 @@ class ChatAppService:
                 first_token_ms=first_token_ms,
                 retries=retries,
                 error_code=error.code.code,
+                conversation_id=conversation_id,
+                workspace_id=workspace_id,
+                run_id=run_id,
             )
             raise error from exc
 
@@ -352,6 +389,9 @@ class ChatAppService:
             usage=usage,
             first_token_ms=first_token_ms,
             retries=retries,
+            conversation_id=conversation_id,
+            workspace_id=workspace_id,
+            run_id=run_id,
         )
 
     @staticmethod
@@ -369,6 +409,9 @@ class ChatAppService:
         first_token_ms: float | None = None,
         retries: int = 0,
         error_code: str | None = None,
+        conversation_id: str | None = None,
+        workspace_id: str = DEFAULT_WORKSPACE_ID,
+        run_id: str | None = None,
     ) -> None:
         metrics_service.record(
             CallMetrics(
@@ -384,6 +427,9 @@ class ChatAppService:
                 usage=usage,
                 retries=retries,
                 error_code=error_code,
+                conversation_id=conversation_id,
+                workspace_id=workspace_id,
+                run_id=run_id,
             )
         )
 

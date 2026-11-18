@@ -7,6 +7,9 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.adapters.base import TokenUsage
+from app.config.tenancy import DEFAULT_WORKSPACE_ID
+from app.repositories import repositories
+from app.repositories.base import LlmCall, MetricsRepository
 from app.services.model_registry import model_registry
 
 logger = logging.getLogger(__name__)
@@ -44,6 +47,9 @@ class CallMetrics:
     usage: TokenUsage | None = None  # Token 分类消耗，上游未返回时为 None
     retries: int = 0  # 本次调用因瞬时故障重试的次数
     error_code: str | None = None  # 失败时的错误码
+    conversation_id: str | None = None  # 关联的历史对话 id
+    workspace_id: str = DEFAULT_WORKSPACE_ID  # 所属工作区
+    run_id: str | None = None  # 关联的 Run id
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -62,6 +68,9 @@ class CallMetrics:
             "tokens": self.usage.to_dict() if self.usage else None,
             "retries": self.retries,
             "error_code": self.error_code,
+            "workspace_id": self.workspace_id,
+            "conversation_id": self.conversation_id,
+            "run_id": self.run_id,
         }
 
 
@@ -93,11 +102,18 @@ class _Aggregate:
 class MetricsService:
     """进程内指标记录：每次调用写结构化日志，并维护全局与按模型的聚合统计。"""
 
-    def __init__(self, recent_limit: int = RECENT_CALL_LIMIT):
+    def __init__(
+        self,
+        recent_limit: int = RECENT_CALL_LIMIT,
+        repository: MetricsRepository | None = None,
+    ):
+        self._repository = repository or repositories.metrics
         self._total = _Aggregate()  # 全局累计指标
         self._by_model: dict[str, _Aggregate] = {}  # 按模型分组的累计指标
         self._recent: deque[dict[str, Any]] = deque(maxlen=recent_limit)  # 最近调用明细
         self._lock = threading.Lock()  # 保护累计指标与明细的并发访问
+        # 启动时从仓储恢复历史调用，重启后 /metrics 不清零
+        self._restore()
 
     def record(self, call: CallMetrics) -> None:
         """记录一次调用；日志便于外部采集，聚合数据供 /metrics 查询。"""
@@ -111,6 +127,117 @@ class MetricsService:
                 self._by_model.setdefault(call.model, _Aggregate()), call, cost_usd
             )
             self._recent.append(payload)
+        self._persist(call, cost_usd, payload["timestamp"])
+
+    def _persist(
+        self, call: CallMetrics, cost_usd: float, timestamp: str
+    ) -> None:
+        """调用明细落库；写入失败只告警，不影响在线请求与内存指标。"""
+        usage = call.usage
+        try:
+            self._repository.insert_call(
+                LlmCall(
+                    workspace_id=call.workspace_id,
+                    conversation_id=call.conversation_id,
+                    run_id=call.run_id,
+                    timestamp=timestamp,
+                    request_id=call.request_id,
+                    requested_model=call.requested_model,
+                    model=call.model,
+                    stream=call.stream,
+                    success=call.success,
+                    latency_ms=call.latency_ms,
+                    first_token_ms=call.first_token_ms,
+                    has_usage=usage is not None,
+                    prompt_tokens=usage.prompt_tokens if usage else 0,
+                    completion_tokens=usage.completion_tokens if usage else 0,
+                    total_tokens=usage.total_tokens if usage else 0,
+                    cached_tokens=usage.cached_tokens if usage else 0,
+                    reasoning_tokens=usage.reasoning_tokens if usage else 0,
+                    retries=call.retries,
+                    error_code=call.error_code,
+                    cost_usd=cost_usd,
+                    prompt_name=call.prompt_name,
+                    prompt_version=call.prompt_version,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 - 指标持久化失败不阻断调用
+            logger.warning("写入调用指标失败: %s", exc)
+
+    def _restore(self) -> None:
+        """从仓储恢复聚合指标与最近明细。"""
+        try:
+            rows = self._repository.list_calls()
+        except Exception as exc:  # noqa: BLE001 - 恢复失败时从零开始
+            logger.warning("恢复调用指标失败: %s", exc)
+            return
+        for row in rows:
+            usage = (
+                TokenUsage(
+                    prompt_tokens=row["prompt_tokens"],
+                    completion_tokens=row["completion_tokens"],
+                    total_tokens=row["total_tokens"],
+                    cached_tokens=row["cached_tokens"],
+                    reasoning_tokens=row["reasoning_tokens"],
+                )
+                if row["has_usage"]
+                else None
+            )
+            call = CallMetrics(
+                model=row["model"],
+                stream=bool(row["stream"]),
+                success=bool(row["success"]),
+                latency_ms=row["latency_ms"],
+                request_id=row["request_id"],
+                requested_model=row["requested_model"],
+                prompt_name=row["prompt_name"],
+                prompt_version=row["prompt_version"],
+                first_token_ms=row["first_token_ms"],
+                usage=usage,
+                retries=row["retries"],
+                error_code=row["error_code"],
+                conversation_id=row["conversation_id"],
+                workspace_id=row["workspace_id"],
+                run_id=row["run_id"],
+            )
+            cost_usd = row["cost_usd"]
+            self._add(self._total, call, cost_usd)
+            self._add(self._by_model.setdefault(row["model"], _Aggregate()), call, cost_usd)
+            self._recent.append(self._row_payload(row))
+
+    @staticmethod
+    def _row_payload(row: Any) -> dict[str, Any]:
+        """把数据库行还原为与 CallMetrics.to_dict 一致的明细结构。"""
+        tokens = None
+        if row["has_usage"]:
+            tokens = {
+                "prompt": row["prompt_tokens"],
+                "completion": row["completion_tokens"],
+                "total": row["total_tokens"],
+                "cached": row["cached_tokens"],
+                "reasoning": row["reasoning_tokens"],
+            }
+        return {
+            "timestamp": row["timestamp"],
+            "request_id": row["request_id"],
+            "requested_model": row["requested_model"],
+            "prompt_name": row["prompt_name"],
+            "prompt_version": row["prompt_version"],
+            "model": row["model"],
+            "stream": bool(row["stream"]),
+            "success": bool(row["success"]),
+            "latency_ms": round(row["latency_ms"], 2),
+            "first_token_ms": (
+                None if row["first_token_ms"] is None else round(row["first_token_ms"], 2)
+            ),
+            "tokens": tokens,
+            "retries": row["retries"],
+            "error_code": row["error_code"],
+            "workspace_id": row["workspace_id"],
+            "conversation_id": row["conversation_id"],
+            "run_id": row["run_id"],
+            "cost_usd": row["cost_usd"],
+        }
 
     def snapshot(self) -> dict[str, Any]:
         """返回全局、按模型以及最近调用的指标快照。"""
