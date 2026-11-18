@@ -7,9 +7,47 @@
   "main": "electron/main.js",
   "scripts": {
     "start": "env -u ELECTRON_FORCE_IS_PACKAGED -u ICUBE_ELECTRON_PATH -u ELECTRON_RUN_AS_NODE electron .",
-    "backend": ".venv/bin/python main.py"
+    "backend": ".venv/bin/python main.py",
+    "build:backend": ".venv/bin/python -m PyInstaller --noconfirm --clean mll-backend.spec",
+    "dist": "npm run build:backend && electron-builder --mac --arm64 --dir && hdiutil create -volname 'MLL Gateway' -srcfolder 'release/mac-arm64/MLL Gateway.app' -ov -format UDZO 'release/MLL Gateway-1.0.0-arm64.dmg'"
   },
   "devDependencies": {
-    "electron": "^45.3.4"
+    "electron": "33.3.1",
+    "electron-builder": "^26.18.0"
+  },
+  "build": {
+    "appId": "com.mailele.mllgateway",
+    "productName": "MLL Gateway",
+    "directories": {
+      "output": "release",
+      "buildResources": "resources"
+    },
+    "electronDownload": {
+      "mirror": "https://npmmirror.com/mirrors/electron/"
+    },
+    "files": [
+      "electron/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "dist/mll-backend",
+        "to": "backend"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "icon": "resources/icon.icns",
+      "identity": "-",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["arm64"]
+        }
+      ]
+    },
+    "dmg": {
+      "title": "MLL Gateway"
+    }
   }
 }

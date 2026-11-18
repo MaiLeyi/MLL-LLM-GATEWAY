@@ -41,9 +41,21 @@ function pythonPath() {
   return process.platform === 'win32' ? 'python' : 'python3';
 }
 
+function backendLaunch() {
+  if (app.isPackaged) {
+    return {
+      command: path.join(process.resourcesPath, 'backend', process.platform === 'win32' ? 'mll-backend.exe' : 'mll-backend'),
+      args: [],
+      cwd: process.resourcesPath,
+    };
+  }
+  return { command: pythonPath(), args: ['main.py'], cwd: ROOT };
+}
+
 function startBackend() {
-  const child = spawn(pythonPath(), ['main.py'], {
-    cwd: ROOT,
+  const { command, args, cwd } = backendLaunch();
+  const child = spawn(command, args, {
+    cwd,
     env: { ...process.env, PYTHONUNBUFFERED: '1', PYTHONPATH: ROOT },
     stdio: ['ignore', 'pipe', 'pipe'],
   });

@@ -1,10 +1,14 @@
 import os
+import sys
+from pathlib import Path
 
 from dotenv import load_dotenv
 
 from app.config.model_config import ModelConfig
 
-load_dotenv()
+# PyInstaller 打包后 .env 随资源释放到 _MEIPASS，开发时位于项目根目录
+BASE_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[2]))
+load_dotenv(BASE_DIR / ".env")
 
 
 MODEL_CONFIGS: dict[str, ModelConfig] = {

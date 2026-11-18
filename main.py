@@ -1,3 +1,4 @@
+import sys
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -11,7 +12,8 @@ from app.api.v1.prompt_router import router as prompt_router
 from app.config.settings import HOST, PORT
 from app.core.exception_handlers import register_exception_handlers
 
-BASE_DIR = Path(__file__).resolve().parent
+# PyInstaller 打包后静态资源位于 _MEIPASS，开发时位于项目根目录
+BASE_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
 
 app = FastAPI(title="MLL Agent API", description="我的第一个练习AGENT")
 
