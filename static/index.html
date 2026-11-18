@@ -7,172 +7,255 @@
 <style>
 :root {
   --bg: #FFFFFF;
-  --surface: #F7F7F8;
-  --muted: #EFEFF2;
-  --text: #171717;
-  --text2: #52525B;
-  --border: rgba(23, 23, 23, 0.12);
-  --brand: #0FDC78;
-  --brand-soft: #E5FFF2;
-  --brand-text: #004D26;
-  --brand-on: #004D26;
-  --danger: #E8463A;
-  --radius: 8px;
-  --radius-card: 12px;
+  --sidebar: #FAFAFA;
+  --surface: #F5F5F5;
+  --surface-2: #EDEDED;
+  --text: #18181B;
+  --text2: #71717A;
+  --border: #E4E4E7;
+  --accent: #18181B;
+  --accent-contrast: #FFFFFF;
+  --danger: #B42318;
+  --ok: #15803D;
+  --radius: 6px;
+  --radius-lg: 8px;
   --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #0E0E10;
-    --surface: #171717;
-    --muted: #262626;
-    --text: #E5E5E5;
-    --text2: #A1A1AA;
-    --border: rgba(229, 229, 229, 0.12);
-    --brand: #32F08C;
-    --brand-soft: #004D26;
-    --brand-text: #E5FFF2;
-    --danger: #F87171;
+    --bg: #111112;
+    --sidebar: #161617;
+    --surface: #1C1C1E;
+    --surface-2: #242427;
+    --text: #ECECEC;
+    --text2: #8E8E93;
+    --border: #2A2A2D;
+    --accent: #EDEDED;
+    --accent-contrast: #111112;
+    --danger: #F1736B;
+    --ok: #4ADE80;
   }
 }
 * { box-sizing: border-box; margin: 0; }
+html, body { height: 100%; }
 body {
+  overflow: hidden;
   background: var(--bg);
   color: var(--text);
   font: 400 14px/1.5 "SF Pro Text", "PingFang SC", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
 }
 button { font: inherit; color: inherit; cursor: pointer; }
-input, select, textarea { font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 6px 10px; outline: none; }
-input:focus, select:focus, textarea:focus { border-color: var(--brand); }
+input, select, textarea { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 5px 9px; outline: none; }
+input:focus, select:focus, textarea:focus { border-color: var(--text2); }
+[hidden] { display: none !important; }
 
-.wrap { max-width: 880px; margin: 0 auto; padding: 0 20px 48px; }
+/* 桌面应用外壳 */
+.app { display: flex; height: 100vh; height: 100dvh; }
 
-/* 顶栏 */
-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 0; border-bottom: 1px solid var(--border); }
-.logo { font-weight: 600; font-size: 16px; display: flex; align-items: center; gap: 8px; }
-.logo .sq { width: 12px; height: 12px; border-radius: 3px; background: var(--brand); }
-nav { display: flex; gap: 4px; }
-nav button { border: none; background: none; color: var(--text2); font-weight: 500; padding: 5px 14px; border-radius: 999px; }
-nav button.active { color: var(--brand-text); background: var(--brand-soft); }
+.sidebar {
+  width: 204px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 12px 10px;
+  background: var(--sidebar);
+  border-right: 1px solid var(--border);
+}
+.brand { display: flex; align-items: center; gap: 8px; padding: 6px 8px 16px; font-weight: 600; font-size: 13px; }
+.brand .mark { width: 14px; height: 14px; border-radius: 4px; background: var(--text); }
+nav { display: flex; flex-direction: column; gap: 2px; }
+nav button {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%; padding: 7px 9px; border: none; border-radius: var(--radius);
+  background: none; color: var(--text2); font-size: 13px; font-weight: 500; text-align: left;
+}
+nav button svg { flex-shrink: 0; opacity: .85; }
+nav button:hover { background: var(--surface); color: var(--text); }
+nav button.active { background: var(--surface-2); color: var(--text); }
+.side-foot {
+  margin-top: auto; display: flex; align-items: center; gap: 6px;
+  padding: 10px 8px 4px; border-top: 1px solid var(--border);
+  font-family: var(--mono); font-size: 11px; color: var(--text2);
+}
+.side-foot .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); flex-shrink: 0; }
 
-main { padding-top: 20px; }
-section[hidden] { display: none; }
+.main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.titlebar {
+  height: 46px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 20px; border-bottom: 1px solid var(--border);
+}
+.titlebar h1 { font-size: 13px; font-weight: 600; }
+.titlebar .tb-meta { font-family: var(--mono); font-size: 11.5px; color: var(--text2); }
 
-/* Playground 控制条 */
-.controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
-.controls label { display: inline-flex; align-items: center; gap: 8px; color: var(--text2); border: 1px solid var(--border); border-radius: var(--radius); padding: 4px 10px; background: var(--surface); }
-.controls select { border: none; background: none; padding: 0; font-family: var(--mono); font-size: 13px; }
-.chip-btn { border: 1px solid var(--border); background: var(--surface); border-radius: var(--radius); padding: 4px 12px; color: var(--text2); }
-.chip-btn.on { color: var(--brand-text); background: var(--brand-soft); border-color: transparent; }
-.switch-wrap { margin-left: auto; cursor: pointer; }
-.switch-wrap input { display: none; }
-.switch { width: 30px; height: 17px; border-radius: 999px; background: var(--muted); border: 1px solid var(--border); position: relative; transition: background .15s; }
-.switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 999px; background: var(--surface); transition: left .15s; }
-.switch-wrap input:checked + .switch { background: var(--brand); border-color: transparent; }
-.switch-wrap input:checked + .switch::after { left: 15px; }
+/* Electron 窗口：让出 macOS 红绿灯位置，并支持拖动窗口 */
+body.is-electron .sidebar { padding-top: 38px; }
+body.is-electron .brand { -webkit-app-region: drag; }
+body.is-electron .titlebar { -webkit-app-region: drag; }
+body.is-electron .titlebar button,
+body.is-electron .titlebar select { -webkit-app-region: no-drag; }
 
-/* 折叠面板 */
-.panel { border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); padding: 12px 16px; margin-bottom: 12px; }
-.panel .p-title { font-weight: 500; margin-bottom: 8px; }
+.content { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.content > section { flex: 1; min-height: 0; }
+
+/* 控制条 */
+.controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.controls label.field { display: inline-flex; align-items: center; gap: 7px; color: var(--text2); font-size: 12.5px; }
+.controls select { min-width: 112px; }
+.chip-btn { border: 1px solid var(--border); background: var(--bg); border-radius: var(--radius); padding: 5px 11px; color: var(--text2); font-size: 12.5px; }
+.chip-btn:hover { color: var(--text); }
+.chip-btn.on { background: var(--surface-2); border-color: transparent; color: var(--text); }
+.switch-row { display: inline-flex; align-items: center; gap: 7px; margin-left: auto; color: var(--text2); font-size: 12.5px; cursor: pointer; }
+.switch-row input { display: none; }
+.switch { width: 28px; height: 16px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); position: relative; transition: background .15s; }
+.switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 10px; height: 10px; border-radius: 999px; background: var(--bg); border: 1px solid var(--border); transition: left .15s; }
+.switch-row input:checked + .switch { background: var(--accent); border-color: var(--accent); }
+.switch-row input:checked + .switch::after { left: 14px; border-color: transparent; }
+
+/* Playground */
+#playground { display: flex; flex-direction: column; }
+.pg-header { flex-shrink: 0; padding: 12px max(20px, calc((100% - 860px) / 2)) 10px; border-bottom: 1px solid var(--border); }
+.panel { margin-top: 10px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--sidebar); padding: 10px 14px; }
+.panel .p-title { font-size: 12px; font-weight: 500; color: var(--text2); margin-bottom: 7px; }
 .panel .p-err { color: var(--danger); font-size: 12px; margin-top: 6px; }
-.panel textarea { width: 100%; min-height: 120px; font-family: var(--mono); font-size: 13px; resize: vertical; }
+.panel textarea { width: 100%; min-height: 100px; font-family: var(--mono); font-size: 12.5px; resize: vertical; background: var(--bg); }
 .p-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-.p-row input { width: 160px; }
-#promptVars { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.p-row input { width: 170px; font-size: 12.5px; }
+#promptVars { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
 #promptVars:empty { display: none; }
-#promptVars label { display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 13px; color: var(--text2); }
-#promptVars input { width: 140px; font-family: var(--mono); font-size: 13px; }
+#promptVars label { display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 12px; color: var(--text2); }
+#promptVars input { width: 140px; font-family: var(--mono); font-size: 12px; }
 
 /* 对话区 */
-.chat { min-height: 260px; display: flex; flex-direction: column; gap: 12px; padding: 8px 0 16px; }
-.chat .empty { color: var(--text2); text-align: center; padding: 64px 0; }
-.msg { max-width: 78%; padding: 10px 14px; border-radius: var(--radius-card); white-space: pre-wrap; word-break: break-word; }
-.msg.user { align-self: flex-end; background: var(--brand); color: var(--brand-on); border-bottom-right-radius: var(--radius); }
-.msg.ai { align-self: flex-start; background: var(--muted); border-bottom-left-radius: var(--radius); }
+.chat {
+  flex: 1; min-height: 0; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 12px;
+  padding: 18px max(20px, calc((100% - 860px) / 2)) 20px;
+}
+.chat .empty { margin: auto; color: var(--text2); font-size: 13px; }
+.msg { max-width: 78%; padding: 9px 13px; border-radius: var(--radius-lg); font-size: 13.5px; line-height: 1.55; white-space: pre-wrap; word-break: break-word; }
+.msg.user { align-self: flex-end; background: var(--accent); color: var(--accent-contrast); }
+.msg.ai { align-self: flex-start; background: var(--surface); border: 1px solid var(--border); }
 .msg.ai.err { background: none; border: 1px solid var(--danger); color: var(--danger); }
-.msg pre.json { margin-top: 8px; padding: 10px 12px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); font-family: var(--mono); font-size: 13px; overflow-x: auto; white-space: pre; }
-.msg .meta { margin-top: 8px; font-family: var(--mono); font-size: 12px; color: var(--text2); }
-.msg .meta code { background: var(--surface); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; }
+.msg pre.json { margin-top: 8px; padding: 9px 11px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); font-family: var(--mono); font-size: 12.5px; overflow-x: auto; white-space: pre; }
+.msg .meta { margin-top: 8px; font-family: var(--mono); font-size: 11.5px; color: var(--text2); }
+.msg .meta code { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; }
 .msg.ai.err .meta { color: var(--danger); opacity: .8; }
-.cursor { display: inline-block; width: 8px; height: 14px; margin-left: 2px; vertical-align: -2px; background: var(--brand); border-radius: 1px; animation: blink 1s steps(1) infinite; }
+.cursor { display: inline-block; width: 7px; height: 13px; margin-left: 2px; vertical-align: -2px; background: var(--text2); border-radius: 1px; animation: blink 1s steps(1) infinite; }
 @keyframes blink { 50% { opacity: 0; } }
 
 /* 输入条 */
-.inputbar { display: flex; gap: 8px; align-items: flex-end; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); padding: 8px; }
-.inputbar textarea { flex: 1; border: none; background: none; resize: none; max-height: 140px; padding: 6px 8px; }
-.btn-primary { background: var(--brand); color: var(--brand-on); border: none; border-radius: var(--radius); padding: 8px 20px; font-weight: 500; }
-.btn-primary:disabled { opacity: .5; cursor: default; }
+.composer { flex-shrink: 0; padding: 0 max(20px, calc((100% - 860px) / 2)) 16px; }
+.inputbar { display: flex; gap: 8px; align-items: flex-end; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg); padding: 7px 7px 7px 10px; }
+.inputbar:focus-within { border-color: var(--text2); }
+.inputbar textarea { flex: 1; border: none; background: none; resize: none; max-height: 140px; padding: 5px 0; }
+.btn-primary { background: var(--accent); color: var(--accent-contrast); border: none; border-radius: var(--radius); padding: 7px 16px; font-size: 13px; font-weight: 500; }
+.btn-primary:disabled { opacity: .4; cursor: default; }
 
 /* Metrics */
-.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; margin-bottom: 24px; }
-.kpi { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-card); padding: 12px 16px; }
-.kpi .v { font-weight: 600; font-size: 16px; font-variant-numeric: tabular-nums; }
-.kpi .l { color: var(--text2); font-size: 12px; margin-top: 4px; }
-.sect { font-size: 12px; font-weight: 500; color: var(--text2); text-transform: uppercase; letter-spacing: .04em; margin: 0 0 8px; }
+#metrics { overflow-y: auto; padding: 20px max(20px, calc((100% - 1040px) / 2)) 32px; }
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-bottom: 24px; }
+.kpi { background: var(--sidebar); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 12px 14px; }
+.kpi .v { font-weight: 600; font-size: 17px; font-variant-numeric: tabular-nums; }
+.kpi .l { color: var(--text2); font-size: 11.5px; margin-top: 3px; }
+.sect { font-size: 11.5px; font-weight: 500; color: var(--text2); text-transform: uppercase; letter-spacing: .05em; margin: 0 0 10px; }
 .mrow { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
-.mrow .name { font-family: var(--mono); font-size: 13px; width: 80px; }
-.mrow .track { flex: 1; height: 8px; border-radius: 999px; background: var(--muted); overflow: hidden; }
-.mrow .fill { height: 100%; border-radius: 999px; background: var(--brand); }
-.mrow .val { color: var(--text2); font-size: 12px; width: 230px; }
-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-th { text-align: left; color: var(--text2); font-weight: 500; font-size: 12px; padding: 6px 10px; border-bottom: 1px solid var(--border); }
+.mrow .name { font-family: var(--mono); font-size: 12.5px; width: 80px; }
+.mrow .track { flex: 1; height: 6px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
+.mrow .fill { height: 100%; border-radius: 999px; background: var(--text2); }
+.mrow .val { color: var(--text2); font-size: 11.5px; width: 230px; }
+table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+th { text-align: left; color: var(--text2); font-weight: 500; font-size: 11.5px; padding: 6px 10px; border-bottom: 1px solid var(--border); }
 td { padding: 7px 10px; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; }
 td.mono { font-family: var(--mono); font-size: 12px; }
 tr:last-child td { border-bottom: none; }
-.badge { font-size: 12px; font-weight: 500; border-radius: 999px; padding: 1px 8px; background: var(--muted); color: var(--text2); }
-.badge.ok { background: var(--brand-soft); color: var(--brand-text); }
+.badge { font-size: 11.5px; font-weight: 500; border-radius: 999px; padding: 1px 8px; background: var(--surface-2); color: var(--text2); }
+.badge.ok { background: none; border: 1px solid var(--border); color: var(--text2); }
+.badge.ok::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--ok); margin-right: 6px; vertical-align: 1px; }
 .badge.err { background: none; border: 1px solid var(--danger); color: var(--danger); }
 .m-block { margin-bottom: 24px; }
-.hint { color: var(--text2); font-size: 12px; }
+.hint { color: var(--text2); font-size: 11.5px; }
 
 /* Prompts */
-.p-layout { display: grid; grid-template-columns: 240px 1fr; gap: 20px; align-items: start; }
-.p-list { border: 1px solid var(--border); border-radius: var(--radius-card); overflow: hidden; }
-.p-group + .p-group { border-top: 1px solid var(--border); }
-.p-name { font-family: var(--mono); font-size: 13px; font-weight: 500; padding: 8px 12px; background: var(--muted); }
-.p-ver { display: flex; align-items: center; gap: 8px; width: 100%; border: none; background: none; padding: 7px 12px; font-family: var(--mono); font-size: 13px; text-align: left; }
-.p-ver:hover, .p-ver.sel { background: var(--surface); }
-.p-ver .latest { font-size: 11px; color: var(--brand-text); background: var(--brand-soft); border-radius: 999px; padding: 0 6px; }
-.p-detail pre { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; font-family: var(--mono); font-size: 13px; white-space: pre-wrap; word-break: break-word; max-height: 260px; overflow: auto; }
-.card { border: 1px solid var(--border); border-radius: var(--radius-card); padding: 16px 20px; margin-bottom: 16px; }
-.card h3 { font-size: 14px; font-weight: 600; margin-bottom: 12px; }
+#prompts { display: flex; }
+.p-layout { display: flex; width: 100%; min-height: 0; }
+.p-list { width: 230px; flex-shrink: 0; overflow-y: auto; border-right: 1px solid var(--border); padding: 10px 8px; background: var(--sidebar); }
+.p-group + .p-group { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+.p-name { font-family: var(--mono); font-size: 11px; font-weight: 500; letter-spacing: .04em; text-transform: uppercase; color: var(--text2); padding: 5px 8px; }
+.p-ver { display: flex; align-items: center; gap: 8px; width: 100%; border: none; background: none; padding: 6px 8px; border-radius: var(--radius); font-family: var(--mono); font-size: 12.5px; text-align: left; color: var(--text2); }
+.p-ver:hover { background: var(--surface); color: var(--text); }
+.p-ver.sel { background: var(--surface-2); color: var(--text); }
+.p-ver .latest { font-size: 10.5px; color: var(--text2); border: 1px solid var(--border); border-radius: 999px; padding: 0 6px; }
+.p-main { flex: 1; overflow-y: auto; padding: 20px 24px 32px; }
+.p-main .card { max-width: 760px; }
+.p-detail pre { background: var(--sidebar); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; font-family: var(--mono); font-size: 12.5px; white-space: pre-wrap; word-break: break-word; max-height: 260px; overflow: auto; }
+.card { border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 16px 18px; margin-bottom: 14px; }
+.card h3 { font-size: 13px; font-weight: 600; margin-bottom: 12px; }
 .card .row { display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
-.card textarea { width: 100%; min-height: 100px; font-family: var(--mono); font-size: 13px; resize: vertical; }
+.card input { width: 190px; }
+.card textarea { width: 100%; min-height: 100px; font-family: var(--mono); font-size: 12.5px; resize: vertical; }
 .form-err { color: var(--danger); font-size: 12px; margin-top: 8px; }
-.form-ok { color: var(--brand-text); font-size: 12px; margin-top: 8px; }
-@media (max-width: 680px) { .p-layout { grid-template-columns: 1fr; } .mrow .val { width: auto; } }
+.form-ok { color: var(--text2); font-size: 12px; margin-top: 8px; }
+
+@media (max-width: 760px) {
+  .sidebar { width: 60px; padding: 12px 6px; }
+  .brand span:not(.mark), nav button span, .side-foot span:not(.dot) { display: none; }
+  .brand { justify-content: center; padding: 6px 0 16px; }
+  nav button { justify-content: center; }
+  .side-foot { justify-content: center; }
+  .mrow .val { width: auto; }
+  .p-list { width: 160px; }
+}
 </style>
 </head>
 <body>
-<div class="wrap">
-  <header>
-    <div class="logo"><span class="sq"></span>MLL Gateway</div>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand"><span class="mark"></span><span>MLL Gateway</span></div>
     <nav>
-      <button data-tab="playground" class="active">Playground</button>
-      <button data-tab="metrics">Metrics</button>
-      <button data-tab="prompts">Prompts</button>
+      <button data-tab="playground" class="active">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        <span>Playground</span>
+      </button>
+      <button data-tab="metrics">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>
+        <span>Metrics</span>
+      </button>
+      <button data-tab="prompts">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+        <span>Prompts</span>
+      </button>
     </nav>
-  </header>
+    <div class="side-foot"><span class="dot"></span><span id="sideHost">localhost</span></div>
+  </aside>
 
-  <main>
-    <!-- Playground -->
-    <section id="playground">
-      <div class="controls">
-        <label>模型 <select id="modelSel"></select></label>
-        <label id="formatWrap">格式
-          <select id="formatSel">
-            <option value="text">text</option>
-            <option value="json_object">json_object</option>
-            <option value="json_schema">json_schema</option>
-          </select>
-        </label>
-        <button class="chip-btn" id="promptBtn">模板引用</button>
-        <label class="switch-wrap">流式 <input type="checkbox" id="streamToggle"><span class="switch"></span></label>
-      </div>
+  <div class="main">
+    <div class="titlebar">
+      <h1 id="tabTitle">Playground</h1>
+      <span class="tb-meta">API v1</span>
+    </div>
 
-      <div class="panel" id="schemaPanel" hidden>
-        <div class="p-title">JSON Schema</div>
-        <textarea id="schemaInput" spellcheck="false">{
+    <div class="content">
+      <!-- Playground -->
+      <section id="playground">
+        <div class="pg-header">
+          <div class="controls">
+            <label class="field">模型 <select id="modelSel"></select></label>
+            <label class="field" id="formatWrap">格式
+              <select id="formatSel">
+                <option value="text">text</option>
+                <option value="json_object">json_object</option>
+                <option value="json_schema">json_schema</option>
+              </select>
+            </label>
+            <button class="chip-btn" id="promptBtn">模板引用</button>
+            <label class="switch-row">流式 <input type="checkbox" id="streamToggle"><span class="switch"></span></label>
+          </div>
+
+          <div class="panel" id="schemaPanel" hidden>
+            <div class="p-title">JSON Schema</div>
+            <textarea id="schemaInput" spellcheck="false">{
   "type": "object",
   "properties": {
     "name": { "type": "string" },
@@ -180,69 +263,73 @@ tr:last-child td { border-bottom: none; }
   },
   "required": ["name", "age"]
 }</textarea>
-        <div class="p-err" id="schemaErr" hidden></div>
-      </div>
-
-      <div class="panel" id="promptPanel" hidden>
-        <div class="p-title">模板引用</div>
-        <div class="p-row">
-          <input id="promptName" placeholder="模板名" spellcheck="false">
-          <input id="promptVersion" placeholder="版本（默认 latest）" spellcheck="false">
-        </div>
-        <div id="promptVars"></div>
-        <div class="p-err" id="promptErr" hidden></div>
-      </div>
-
-      <div class="chat" id="chat"><div class="empty">选择模型，输入消息开始对话</div></div>
-
-      <div class="inputbar">
-        <textarea id="input" rows="1" placeholder="输入消息，Enter 发送，Shift+Enter 换行"></textarea>
-        <button class="btn-primary" id="sendBtn">发送</button>
-      </div>
-    </section>
-
-    <!-- Metrics -->
-    <section id="metrics" hidden>
-      <div class="kpis" id="kpis"></div>
-      <div class="m-block">
-        <div class="sect">按模型</div>
-        <div id="byModel"></div>
-      </div>
-      <div class="m-block">
-        <div class="sect">最近调用 <span class="hint" id="metricsHint"></span></div>
-        <table>
-          <thead><tr><th>时间</th><th>模型</th><th>类型</th><th>状态</th><th>耗时</th><th>Tokens</th><th>重试</th></tr></thead>
-          <tbody id="recentBody"></tbody>
-        </table>
-      </div>
-    </section>
-
-    <!-- Prompts -->
-    <section id="prompts" hidden>
-      <div class="p-layout">
-        <div class="p-list" id="promptList"></div>
-        <div>
-          <div class="card p-detail" id="promptDetail" hidden>
-            <h3 id="pdTitle"></h3>
-            <pre id="pdTemplate"></pre>
-            <div class="hint" id="pdMeta" style="margin:8px 0 12px"></div>
-            <button class="btn-primary" id="pdUse">在 Playground 中使用</button>
+            <div class="p-err" id="schemaErr" hidden></div>
           </div>
-          <div class="card">
-            <h3>发布新版本</h3>
-            <div class="row">
-              <input id="pubName" placeholder="模板名" spellcheck="false">
-              <input id="pubVersion" placeholder="版本，如 v1" spellcheck="false">
+
+          <div class="panel" id="promptPanel" hidden>
+            <div class="p-title">模板引用</div>
+            <div class="p-row">
+              <input id="promptName" placeholder="模板名" spellcheck="false">
+              <input id="promptVersion" placeholder="版本（默认 latest）" spellcheck="false">
             </div>
-            <textarea id="pubTemplate" placeholder="模板正文，使用 ${变量名} 作为占位符" spellcheck="false"></textarea>
-            <div class="row" style="margin-top:8px"><button class="btn-primary" id="pubBtn">发布</button></div>
-            <div class="form-err" id="pubErr" hidden></div>
-            <div class="form-ok" id="pubOk" hidden></div>
+            <div id="promptVars"></div>
+            <div class="p-err" id="promptErr" hidden></div>
           </div>
         </div>
-      </div>
-    </section>
-  </main>
+
+        <div class="chat" id="chat"><div class="empty">选择模型，输入消息开始对话</div></div>
+
+        <div class="composer">
+          <div class="inputbar">
+            <textarea id="input" rows="1" placeholder="输入消息，Enter 发送，Shift+Enter 换行"></textarea>
+            <button class="btn-primary" id="sendBtn">发送</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Metrics -->
+      <section id="metrics" hidden>
+        <div class="kpis" id="kpis"></div>
+        <div class="m-block">
+          <div class="sect">按模型</div>
+          <div id="byModel"></div>
+        </div>
+        <div class="m-block">
+          <div class="sect">最近调用 <span class="hint" id="metricsHint"></span></div>
+          <table>
+            <thead><tr><th>时间</th><th>模型</th><th>类型</th><th>状态</th><th>耗时</th><th>Tokens</th><th>重试</th></tr></thead>
+            <tbody id="recentBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Prompts -->
+      <section id="prompts" hidden>
+        <div class="p-layout">
+          <div class="p-list" id="promptList"></div>
+          <div class="p-main">
+            <div class="card p-detail" id="promptDetail" hidden>
+              <h3 id="pdTitle"></h3>
+              <pre id="pdTemplate"></pre>
+              <div class="hint" id="pdMeta" style="margin:8px 0 12px"></div>
+              <button class="btn-primary" id="pdUse">在 Playground 中使用</button>
+            </div>
+            <div class="card">
+              <h3>发布新版本</h3>
+              <div class="row">
+                <input id="pubName" placeholder="模板名" spellcheck="false">
+                <input id="pubVersion" placeholder="版本，如 v1" spellcheck="false">
+              </div>
+              <textarea id="pubTemplate" placeholder="模板正文，使用 ${变量名} 作为占位符" spellcheck="false"></textarea>
+              <div class="row" style="margin-top:8px"><button class="btn-primary" id="pubBtn">发布</button></div>
+              <div class="form-err" id="pubErr" hidden></div>
+              <div class="form-ok" id="pubOk" hidden></div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -262,9 +349,11 @@ async function api(path, options) {
 
 /* ---------- Tab 导航 ---------- */
 let metricsTimer = null;
+const TAB_TITLES = { playground: 'Playground', metrics: 'Metrics', prompts: 'Prompts' };
 function switchTab(name) {
   document.querySelectorAll('nav button').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
   ['playground', 'metrics', 'prompts'].forEach((t) => { $(t).hidden = t !== name; });
+  $('tabTitle').textContent = TAB_TITLES[name] || name;
   if (metricsTimer) { clearInterval(metricsTimer); metricsTimer = null; }
   if (name === 'metrics') { loadMetrics(); metricsTimer = setInterval(loadMetrics, 5000); }
   if (name === 'prompts') loadPrompts();
@@ -392,7 +481,6 @@ async function sendMessage() {
   addBubble('user', esc(text));
 
   const stream = $('streamToggle').checked;
-  const startedAt = performance.now();
   try {
     if (stream) await sendStream(payload);
     else await sendComplete(payload);
@@ -404,7 +492,6 @@ async function sendMessage() {
     $('sendBtn').disabled = false;
     $('input').focus();
   }
-  void startedAt;
 }
 
 async function sendComplete(payload) {
@@ -615,6 +702,8 @@ $('pubBtn').addEventListener('click', async () => {
 });
 
 /* ---------- 启动 ---------- */
+if (navigator.userAgent.includes('Electron')) document.body.classList.add('is-electron');
+$('sideHost').textContent = location.host || 'localhost';
 loadModels();
 $('input').focus();
 </script>

@@ -1,0 +1,15 @@
+{
+  "name": "mll-llm-gateway",
+  "productName": "MLL Gateway",
+  "version": "1.0.0",
+  "private": true,
+  "description": "MLL LLM Gateway 桌面控制台",
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "env -u ELECTRON_FORCE_IS_PACKAGED -u ICUBE_ELECTRON_PATH -u ELECTRON_RUN_AS_NODE electron .",
+    "backend": ".venv/bin/python main.py"
+  },
+  "devDependencies": {
+    "electron": "^45.3.4"
+  }
+}

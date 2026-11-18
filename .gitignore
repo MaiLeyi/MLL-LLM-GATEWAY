@@ -1,4 +1,6 @@
 .venv/
+node_modules/
+Singleton*
 .vscode/
 __pycache__/
 *.py[cod]
